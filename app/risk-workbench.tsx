@@ -541,6 +541,7 @@ export function RiskWorkbench() {
                 <th>Instrument</th>
                 <th>Quantity</th>
                 <th>Unit price</th>
+                <th>Market price</th>
                 <th>Multiplier</th>
                 <th>Market value</th>
                 <th>Annual vol.</th>
@@ -560,6 +561,7 @@ export function RiskWorkbench() {
                 </td>
                 <td><input aria-label="New position quantity" placeholder="0" type="number" value={positionDraft.quantity} onChange={(event) => setPositionDraft({ ...positionDraft, quantity: event.target.value })} /></td>
                 <td><input aria-label="New position unit price" placeholder="0.00" type="number" min="0" step="0.01" value={positionDraft.price} onChange={(event) => setPositionDraft({ ...positionDraft, price: event.target.value })} /></td>
+                <td><span className="market-quote market-quote-empty">After add</span></td>
                 <td><input aria-label="New position multiplier" type="number" min="0" step="1" value={positionDraft.multiplier} onChange={(event) => setPositionDraft({ ...positionDraft, multiplier: event.target.value })} /></td>
                 <td><input aria-label="New position market value" type="number" readOnly value={
                   positionDraft.quantity && positionDraft.price
@@ -582,6 +584,18 @@ export function RiskWorkbench() {
                   </td>
                   <td><input aria-label={`${position.symbol} quantity`} type="number" value={position.quantity} onChange={(e) => updatePosition(position.id, "quantity", e.target.value)} /></td>
                   <td><input aria-label={`${position.symbol} unit price`} type="number" min="0" step="0.01" value={position.price} onChange={(e) => updatePosition(position.id, "price", e.target.value)} /></td>
+                  <td>
+                    {position.marketPrice !== undefined ? (
+                      <span className="market-quote">
+                        <strong>{new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 4 }).format(position.marketPrice)}</strong>
+                        <small>{position.marketPriceAt
+                          ? new Date(position.marketPriceAt).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })
+                          : "Latest available"}</small>
+                      </span>
+                    ) : (
+                      <span className="market-quote market-quote-empty">Unavailable</span>
+                    )}
+                  </td>
                   <td><input aria-label={`${position.symbol} multiplier`} type="number" min="0" step="1" value={position.multiplier} onChange={(e) => updatePosition(position.id, "multiplier", e.target.value)} /></td>
                   <td><input aria-label={`${position.symbol} market value`} type="number" value={position.marketValue} readOnly /></td>
                   <td><input aria-label={`${position.symbol} volatility`} type="number" min="0" step="0.01" value={position.volatility} onChange={(e) => updatePosition(position.id, "volatility", e.target.value)} /></td>

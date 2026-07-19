@@ -73,6 +73,7 @@ test("calculates missing broker risk factors from historical prices", () => {
   assert.ok(enriched.volatility > 0);
   assert.ok(Math.abs(enriched.beta - 2) < 1e-10);
   assert.equal(enriched.price, 250);
+  assert.equal(enriched.marketPrice, 250);
   assert.equal(enriched.marketValue, 25000);
 });
 

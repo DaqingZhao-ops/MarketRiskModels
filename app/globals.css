@@ -183,6 +183,10 @@ th { padding: 11px 16px; color: var(--muted); background: #eeece4; text-align: l
 td { padding: 10px 9px; border-top: 1px solid var(--line); }
 td input, td select { width: 100%; min-width: 84px; border: 1px solid transparent; padding: 8px; background: transparent; color: var(--ink); font-size: 11px; }
 td input:focus, td select:focus { outline: none; border-color: #88a99b; background: white; }
+.market-quote { display: grid; min-width: 105px; gap: 3px; padding: 7px 8px; background: #e3eee8; color: #285f48; white-space: nowrap; }
+.market-quote strong { font-size: 11px; }
+.market-quote small { color: #567267; font: 8px var(--font-geist-mono); }
+.market-quote-empty { background: #ecece7; color: var(--muted); font: 9px var(--font-geist-mono); }
 .position-draft td { background: #f4f1e7; border-top: 2px solid #c9c3ae; border-bottom: 2px solid #c9c3ae; }
 .position-draft input, .position-draft select { background: rgba(255,255,255,.55); border-color: #d5d0bf; }
 .add-row { min-width: 52px; border: 1px solid var(--green); padding: 8px 10px; background: var(--green); color: white; font-size: 10px; font-weight: 700; }

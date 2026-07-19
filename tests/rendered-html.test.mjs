@@ -38,6 +38,8 @@ test("server-renders the market risk workbench", async () => {
   assert.match(html, /Positions &amp; sensitivities/);
   assert.match(html, /New position symbol/);
   assert.match(html, />Add<\/button>/);
+  assert.match(html, /Market price/);
+  assert.match(html, /Unavailable/);
   assert.match(html, /Risk source/);
   assert.match(html, /Calculating…/);
   assert.match(html, /Important limitation/);

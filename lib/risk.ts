@@ -11,6 +11,8 @@ export type Position = {
   volatility: number;
   beta: number;
   delta: number;
+  marketPrice?: number;
+  marketPriceAt?: string;
   riskSource?: "provided" | "historical-pending" | "historical" | "fallback";
 };
 
@@ -126,6 +128,8 @@ export function enrichPositionsWithHistoricalRisk(
     return {
       ...position,
       price: latestPrice,
+      marketPrice: canRefreshPrice ? latestPrice : undefined,
+      marketPriceAt: canRefreshPrice ? series.latestPriceAt : undefined,
       marketValue: Math.abs(position.quantity * latestPrice * position.multiplier),
       volatility: Number.isFinite(volatility) && volatility > 0 ? volatility : position.volatility,
       beta: Number.isFinite(beta) ? beta : position.beta,
