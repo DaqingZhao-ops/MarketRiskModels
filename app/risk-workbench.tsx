@@ -30,6 +30,14 @@ const riskSourceLabels = {
   fallback: "Fallback",
 } as const;
 
+const riskSourceOrder: Record<NonNullable<Position["riskSource"]> | "sample", number> = {
+  "historical-pending": 0,
+  historical: 1,
+  fallback: 2,
+  provided: 3,
+  sample: 4,
+};
+
 const MODEL_COPY: Record<ModelKind, { label: string; note: string }> = {
   historical: {
     label: "Historical simulation",
@@ -150,6 +158,16 @@ export function RiskWorkbench() {
   }, [positions, model, confidence, horizon]);
 
   const result = remoteResult ?? continuityResult;
+  const displayedPositions = useMemo(
+    () => positions
+      .map((position, index) => ({ position, index }))
+      .sort((left, right) =>
+        riskSourceOrder[left.position.riskSource ?? "sample"] -
+          riskSourceOrder[right.position.riskSource ?? "sample"] ||
+        left.index - right.index)
+      .map(({ position }) => position),
+    [positions],
+  );
 
   function updatePosition(id: string, field: keyof Position, raw: string) {
     setPositions((current) =>
@@ -407,7 +425,7 @@ export function RiskWorkbench() {
               </tr>
             </thead>
             <tbody>
-              {positions.map((position) => (
+              {displayedPositions.map((position) => (
                 <tr key={position.id}>
                   <td><input aria-label={`${position.symbol} symbol`} value={position.symbol} onChange={(e) => updatePosition(position.id, "symbol", e.target.value.toUpperCase())} /></td>
                   <td>
