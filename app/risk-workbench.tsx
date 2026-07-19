@@ -191,6 +191,8 @@ export function RiskWorkbench() {
   const [horizon, setHorizon] = useState(1);
   const [message, setMessage] = useState("Default portfolio loaded; calculating risk factors from history.");
   const [importStatus, setImportStatus] = useState("");
+  const [selectedImportFile, setSelectedImportFile] = useState<File>();
+  const [importInputKey, setImportInputKey] = useState(0);
   const [history, setHistory] = useState<HistoricalData>();
   const [historyStatus, setHistoryStatus] = useState("Loading market history…");
   const [remoteResult, setRemoteResult] = useState<RiskResult>();
@@ -542,9 +544,20 @@ export function RiskWorkbench() {
     }
   }
 
-  async function importCsv(event: ChangeEvent<HTMLInputElement>) {
+  function selectImportFile(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
-    if (!file) return;
+    setSelectedImportFile(file);
+    setImportStatus(file
+      ? `${file.name} selected. Press “Import selected file” to replace the current default.`
+      : "");
+  }
+
+  async function importCsv() {
+    const file = selectedImportFile;
+    if (!file) {
+      setImportStatus("Choose a Schwab, Fidelity, or app CSV file first.");
+      return;
+    }
     setImportStatus(`Reading ${file.name}…`);
     let parsed: Position[];
     try {
@@ -553,7 +566,6 @@ export function RiskWorkbench() {
       const failure = error instanceof Error ? error.message : "Unable to import CSV.";
       setImportStatus(`Import failed: ${failure}`);
       setMessage(failure);
-      event.target.value = "";
       return;
     }
 
@@ -577,7 +589,8 @@ export function RiskWorkbench() {
       );
       setMessage(`Imported positions are displayed, but persistence failed: ${failure}`);
     }
-    event.target.value = "";
+    setSelectedImportFile(undefined);
+    setImportInputKey((current) => current + 1);
   }
 
   return (
@@ -652,10 +665,19 @@ export function RiskWorkbench() {
             <option value={10}>10 days</option>
           </select>
         </div>
-        <label className="upload">
-          Import Schwab, Fidelity, or app CSV
-          <input type="file" accept=".csv,text/csv" onChange={importCsv} />
-        </label>
+        <div className="import-control">
+          <label htmlFor="position-file">Position source CSV</label>
+          <input
+            key={importInputKey}
+            id="position-file"
+            type="file"
+            accept=".csv,text/csv"
+            onChange={selectImportFile}
+          />
+          <button type="button" disabled={!selectedImportFile} onClick={importCsv}>
+            Import selected file
+          </button>
+        </div>
       </section>
 
       {importStatus ? <p className="import-status" role="status">{importStatus}</p> : null}
@@ -924,6 +946,7 @@ export function RiskWorkbench() {
             </button>
           </div>
         </div>
+        {importStatus ? <p className="portfolio-import-status" role="status">{importStatus}</p> : null}
         <p className="portfolio-save-status" role="status">{portfolioSaveStatus}</p>
         <div className="table-wrap">
           <table>

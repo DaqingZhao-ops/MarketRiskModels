@@ -108,7 +108,7 @@ h1 {
 }
 .control-wide { display: grid; grid-template-columns: 1fr; }
 .control-wide small { margin-top: 7px; color: #9eb8af; font-size: 10px; }
-.upload, .secondary {
+.upload, .secondary, .import-control button {
   border: 1px solid var(--mint);
   padding: 12px 17px;
   background: var(--mint);
@@ -117,12 +117,32 @@ h1 {
   font-size: 12px;
   text-align: center;
 }
-.upload input { display: none; }
+.import-control {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) auto;
+  gap: 7px;
+  align-items: end;
+}
+.import-control label { grid-column: 1 / -1; }
+.import-control input {
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid #789087;
+  background: white;
+  color: var(--green);
+  font-size: 11px;
+}
+.import-control button:disabled { cursor: not-allowed; opacity: .55; }
 .notice { margin: 40px 4vw 0; color: var(--muted); font-size: 11px; }
 .import-status {
   margin: 14px 4vw -26px;
   color: #dcece6;
   font-size: 12px;
+}
+.portfolio-import-status {
+  margin: 10px 0 0;
+  color: var(--green);
+  font: 11px var(--font-geist-mono);
 }
 
 .rate-model {
