@@ -17,7 +17,15 @@ export type InterestRateCalibration = {
   secondFactorMeanReversion?: number;
   secondFactorVolatility?: number;
   factorCorrelation?: number;
-  parameterSource: "governed-default";
+  parameterSource: "governed-default" | "historical-calibration" | "option-implied-calibration";
+  calibrationSource?: string;
+  calibrationObjective?: string;
+  observationCount?: number;
+  calibrationWindowStart?: string;
+  calibrationWindowEnd?: string;
+  parameterBounds?: Record<string, [number, number]>;
+  fallbackUsed?: boolean;
+  fallbackReason?: string;
   curveSource: string;
   curve: HullWhiteCurvePoint[];
   fitRmse: number;

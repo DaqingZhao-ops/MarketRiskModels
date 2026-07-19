@@ -134,3 +134,26 @@ def test_saves_hull_white_and_g2_calibrations_independently(monkeypatch) -> None
         saved_g2 = client.get("/api/v1/rates", params={"model": "G2++ 2F"})
         assert saved_hull_white.json()["calibration"]["id"] == "id-Hull-White 1F"
         assert saved_g2.json()["calibration"]["id"] == "id-G2++ 2F"
+
+
+def test_estimates_bounded_g2_parameters_from_treasury_history() -> None:
+    observations = []
+    level = 4.0
+    slope = 0.4
+    for day in range(260):
+        level = 4.0 + 0.97 * (level - 4.0) + 0.03 * ((day % 7) - 3)
+        slope = 0.4 + 0.94 * (slope - 0.4) + 0.02 * ((day % 5) - 2)
+        maturities = [-0.7, -0.5, -0.3, -0.15, 0, 0.15, 0.3, 0.45, 0.65, 0.75]
+        curve = [level + slope * loading for loading in maturities]
+        observations.append((f"2025-{day // 28 + 1:02d}-{day % 28 + 1:02d}", curve))
+
+    result = desktop_api.estimate_g2_parameters(observations)
+
+    assert result["observationCount"] == 260
+    assert result["fallbackUsed"] is False
+    assert 0.01 <= result["meanReversion"] <= 1.50
+    assert 0.001 <= result["volatility"] <= 0.10
+    assert 0.01 <= result["secondFactorMeanReversion"] <= 2.00
+    assert 0.001 <= result["secondFactorVolatility"] <= 0.10
+    assert -0.95 <= result["factorCorrelation"] <= 0.95
+    assert result["fitRmse"] >= 0

@@ -768,7 +768,19 @@ export function RiskWorkbench() {
               </>
             ) : null}
             <div><dt>Curve nodes</dt><dd>{rateCalibration.curve.length}</dd></div>
-            <div><dt>Parameter source</dt><dd>Governed default</dd></div>
+            <div><dt>Parameter source</dt><dd>{rateCalibration.calibrationSource ?? (rateCalibration.parameterSource === "governed-default" ? "Governed default" : rateCalibration.parameterSource)}</dd></div>
+            {rateCalibration.observationCount ? (
+              <div><dt>Observations</dt><dd>{rateCalibration.observationCount.toLocaleString()}</dd></div>
+            ) : null}
+            {rateCalibration.calibrationWindowStart && rateCalibration.calibrationWindowEnd ? (
+              <div><dt>Calibration window</dt><dd>{rateCalibration.calibrationWindowStart} to {rateCalibration.calibrationWindowEnd}</dd></div>
+            ) : null}
+            {rateCalibration.model === "G2++ 2F" ? (
+              <div><dt>Historical fit RMSE</dt><dd>{rateCalibration.fitRmse.toFixed(2)} bp</dd></div>
+            ) : null}
+            {rateCalibration.fallbackUsed ? (
+              <div><dt>Fallback</dt><dd>Yes — {rateCalibration.fallbackReason ?? "historical calibration unavailable"}</dd></div>
+            ) : null}
           </dl>
         ) : <p className="rate-model-empty">No valid stored calibration is available.</p>}
         <div className="rate-model-action">

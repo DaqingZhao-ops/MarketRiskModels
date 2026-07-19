@@ -1,9 +1,11 @@
+import math
 import re
 from datetime import datetime, timezone
 from typing import Annotated, Any
 from uuid import uuid4
 
 import httpx
+import numpy as np
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -126,6 +128,118 @@ async def market_history(
 
 
 RATE_MODELS = {"Hull-White 1F", "G2++ 2F"}
+G2_BOUNDS = {
+    "meanReversion": [0.01, 1.50],
+    "volatility": [0.001, 0.10],
+    "secondFactorMeanReversion": [0.01, 2.00],
+    "secondFactorVolatility": [0.001, 0.10],
+    "factorCorrelation": [-0.95, 0.95],
+}
+
+
+def _bounded(value: float, bounds: list[float]) -> float:
+    return max(bounds[0], min(bounds[1], value))
+
+
+def estimate_g2_parameters(
+    observations: list[tuple[str, list[float]]],
+) -> dict[str, Any]:
+    if len(observations) < 60:
+        raise ValueError("At least 60 daily Treasury curves are required for G2++ calibration.")
+    matrix = np.asarray([values for _, values in observations], dtype=float) / 100
+    if matrix.ndim != 2 or matrix.shape[1] < 4 or not np.isfinite(matrix).all():
+        raise ValueError("Treasury history contains invalid curve observations.")
+
+    level = matrix.mean(axis=1)
+    slope = matrix[:, -2:].mean(axis=1) - matrix[:, 3:5].mean(axis=1)
+    factors = np.column_stack([level, slope])
+    factors -= factors.mean(axis=0)
+
+    def fit_factor(values: np.ndarray, bounds: list[float]) -> tuple[float, np.ndarray]:
+        lagged = values[:-1]
+        current = values[1:]
+        denominator = float(lagged @ lagged)
+        phi = float(lagged @ current / denominator) if denominator > 1e-14 else 0.99
+        phi = max(0.001, min(0.99996, phi))
+        mean_reversion = _bounded(-math.log(phi) * 252, bounds)
+        innovations = current - math.exp(-mean_reversion / 252) * lagged
+        return mean_reversion, innovations
+
+    first_mean_reversion, first_innovations = fit_factor(
+        factors[:, 0],
+        G2_BOUNDS["meanReversion"],
+    )
+    second_mean_reversion, second_innovations = fit_factor(
+        factors[:, 1],
+        G2_BOUNDS["secondFactorMeanReversion"],
+    )
+    first_volatility = _bounded(
+        float(np.std(first_innovations, ddof=1) * np.sqrt(252)),
+        G2_BOUNDS["volatility"],
+    )
+    second_volatility = _bounded(
+        float(np.std(second_innovations, ddof=1) * np.sqrt(252)),
+        G2_BOUNDS["secondFactorVolatility"],
+    )
+    correlation = float(np.corrcoef(first_innovations, second_innovations)[0, 1])
+    correlation = _bounded(
+        correlation if np.isfinite(correlation) else -0.70,
+        G2_BOUNDS["factorCorrelation"],
+    )
+
+    design = np.column_stack([np.ones(len(factors)), factors])
+    fitted = design @ np.linalg.lstsq(design, matrix, rcond=None)[0]
+    rmse_basis_points = float(np.sqrt(np.mean((matrix - fitted) ** 2)) * 10_000)
+    return {
+        "meanReversion": first_mean_reversion,
+        "volatility": first_volatility,
+        "secondFactorMeanReversion": second_mean_reversion,
+        "secondFactorVolatility": second_volatility,
+        "factorCorrelation": correlation,
+        "fitRmse": rmse_basis_points,
+        "observationCount": len(observations),
+        "calibrationWindowStart": observations[0][0],
+        "calibrationWindowEnd": observations[-1][0],
+        "calibrationSource": "U.S. Treasury daily par-yield curve history",
+        "calibrationObjective": "Two-factor AR(1) proxy on curve level and long-end–intermediate slope",
+        "parameterBounds": G2_BOUNDS,
+        "fallbackUsed": False,
+    }
+
+
+async def fetch_treasury_history() -> list[tuple[str, list[float]]]:
+    now = datetime.now(timezone.utc)
+    fields = [
+        "BC_3MONTH", "BC_6MONTH", "BC_1YEAR", "BC_2YEAR", "BC_3YEAR",
+        "BC_5YEAR", "BC_7YEAR", "BC_10YEAR", "BC_20YEAR", "BC_30YEAR",
+    ]
+    observations: list[tuple[str, list[float]]] = []
+    async with httpx.AsyncClient(timeout=30) as client:
+        for year in [now.year - 1, now.year]:
+            response = await client.get(
+                "https://home.treasury.gov/resource-center/data-chart-center/interest-rates/pages/xml",
+                params={
+                    "data": "daily_treasury_yield_curve",
+                    "field_tdr_date_value": str(year),
+                },
+            )
+            response.raise_for_status()
+            for entry in re.findall(r"<entry>[\s\S]*?</entry>", response.text, flags=re.IGNORECASE):
+                date_match = re.search(
+                    r"<d:NEW_DATE[^>]*>([^<]+)</d:NEW_DATE>",
+                    entry,
+                    re.IGNORECASE,
+                )
+                values = []
+                for field in fields:
+                    match = re.search(fr"<d:{field}[^>]*>([^<]+)</d:{field}>", entry, re.IGNORECASE)
+                    if not match:
+                        values = []
+                        break
+                    values.append(float(match.group(1)))
+                if date_match and values:
+                    observations.append((date_match.group(1)[:10], values))
+    return sorted(dict(observations).items())
 
 
 async def treasury_calibration(model: str) -> dict[str, Any]:
@@ -179,13 +293,23 @@ async def treasury_calibration(model: str) -> dict[str, Any]:
         "status": "valid",
     }
     if model == "G2++ 2F":
-        calibration.update({
-            "meanReversion": 0.10,
-            "volatility": 0.01,
-            "secondFactorMeanReversion": 0.30,
-            "secondFactorVolatility": 0.015,
-            "factorCorrelation": -0.70,
-        })
+        try:
+            calibration.update(estimate_g2_parameters(await fetch_treasury_history()))
+            calibration["parameterSource"] = "historical-calibration"
+        except Exception as error:
+            calibration.update({
+                "meanReversion": 0.10,
+                "volatility": 0.01,
+                "secondFactorMeanReversion": 0.30,
+                "secondFactorVolatility": 0.015,
+                "factorCorrelation": -0.70,
+                "calibrationSource": "Governed G2++ fallback parameters",
+                "calibrationObjective": "No calibration performed",
+                "observationCount": 0,
+                "parameterBounds": G2_BOUNDS,
+                "fallbackUsed": True,
+                "fallbackReason": str(error),
+            })
     return calibration
 
 
