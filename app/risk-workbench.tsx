@@ -75,7 +75,7 @@ type MarketBriefing = {
     value: number;
     change: number;
     percentChange: number;
-    unit: "index" | "percent";
+    unit: "index" | "percent" | "fx" | "gold" | "oil";
     marketState: string;
     asOf: string;
   }>;
@@ -758,7 +758,13 @@ export function RiskWorkbench() {
               <strong>
                 {indicator.unit === "percent"
                   ? `${indicator.value.toFixed(3)}%`
-                  : indicator.value.toLocaleString("en-US", { maximumFractionDigits: 2 })}
+                  : indicator.unit === "fx"
+                    ? indicator.value.toFixed(4)
+                    : indicator.unit === "gold"
+                      ? `$${indicator.value.toLocaleString("en-US", { maximumFractionDigits: 2 })}/oz`
+                      : indicator.unit === "oil"
+                        ? `$${indicator.value.toFixed(2)}/bbl`
+                        : indicator.value.toLocaleString("en-US", { maximumFractionDigits: 2 })}
               </strong>
               <small className={indicator.change >= 0 ? "market-up" : "market-down"}>
                 {indicator.change >= 0 ? "+" : ""}

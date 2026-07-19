@@ -36,6 +36,11 @@ MARKET_INDICATORS = [
     ("Dow", "^DJI", "index"),
     ("10Y Treasury", "^TNX", "percent"),
     ("Money market proxy", "^IRX", "percent"),
+    ("EUR / USD", "EURUSD=X", "fx"),
+    ("USD / JPY", "JPY=X", "fx"),
+    ("USD / CNY", "CNY=X", "fx"),
+    ("Gold", "GC=F", "gold"),
+    ("WTI crude oil", "CL=F", "oil"),
 ]
 
 
