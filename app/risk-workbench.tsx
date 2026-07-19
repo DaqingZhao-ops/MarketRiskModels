@@ -166,7 +166,7 @@ export function RiskWorkbench() {
         if (!response.ok) throw new Error(payload.error ?? "Unable to load market history.");
         setHistory(payload as HistoricalData);
         setPositions((current) => enrichPositionsWithHistoricalRisk(current, payload as HistoricalData));
-        setHistoryStatus("Market history loaded.");
+        setHistoryStatus("Latest eligible prices and market history loaded.");
       } catch (error) {
         if (controller.signal.aborted) return;
         setHistory(undefined);
@@ -615,7 +615,9 @@ export function RiskWorkbench() {
           CSV columns: symbol, type, quantity, price, multiplier, marketValue,
           volatility, beta, delta. Market value is quantity × unit price ×
           multiplier; option contracts use 100. Sample prices and option
-          premiums are illustrative and editable. Delta is 1.0 for cash instruments.
+          premiums remain illustrative when no exact tradable identifier is available.
+          Stock, ETF, and mutual-fund prices refresh from the latest market feed.
+          Delta is 1.0 for cash instruments.
           Risk source identifies calculated, supplied, fallback, and sample values.
         </p>
       </section>

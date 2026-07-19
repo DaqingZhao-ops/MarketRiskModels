@@ -22,6 +22,11 @@ type YahooChart = {
   chart?: {
     result?: Array<{
       timestamp?: number[];
+      meta?: {
+        regularMarketPrice?: number;
+        regularMarketTime?: number;
+        currency?: string;
+      };
       indicators?: {
         adjclose?: Array<{ adjclose?: Array<number | null> }>;
         quote?: Array<{ close?: Array<number | null> }>;
@@ -43,7 +48,7 @@ async function fetchSeries(symbol: string, period1: number, period2: number) {
   url.searchParams.set("includeAdjustedClose", "true");
   const response = await fetch(url, {
     headers: { "User-Agent": "Mozilla/5.0 MarketRiskModels/1.0" },
-    next: { revalidate: 21600 },
+    next: { revalidate: 300 },
   });
   if (!response.ok) throw new Error(`${mapped}: market-data request failed (${response.status})`);
   const payload = await response.json() as YahooChart;
@@ -68,6 +73,11 @@ async function fetchSeries(symbol: string, period1: number, period2: number) {
     sourceSymbol: mapped,
     dates: observations.map((item) => item.date),
     adjustedClose: observations.map((item) => item.price),
+    latestPrice: result.meta?.regularMarketPrice ?? observations.at(-1)?.price,
+    latestPriceAt: result.meta?.regularMarketTime
+      ? new Date(result.meta.regularMarketTime * 1000).toISOString()
+      : observations.at(-1)?.date,
+    currency: result.meta?.currency ?? "USD",
   };
 }
 
@@ -89,7 +99,7 @@ export async function GET(request: NextRequest) {
     const series = results.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
     if (!series.length) throw new Error("No price history was returned for the imported positions.");
     return NextResponse.json({
-      source: "Yahoo Finance adjusted daily close",
+      source: "Yahoo Finance latest quote and adjusted daily close",
       fetchedAt: new Date().toISOString(),
       mappings: Object.fromEntries(series.map((item) => [item.symbol, item.sourceSymbol])),
       series,

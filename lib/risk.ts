@@ -21,6 +21,9 @@ export type HistoricalSeries = {
   sourceSymbol: string;
   dates: string[];
   adjustedClose: number[];
+  latestPrice?: number;
+  latestPriceAt?: string;
+  currency?: string;
 };
 
 export type HistoricalData = {
@@ -116,8 +119,14 @@ export function enrichPositionsWithHistoricalRisk(
     const optionDelta = position.type.endsWith("Option")
       ? blackScholesDelta(position.symbol, series.adjustedClose.at(-1) ?? 0, volatility, asOf)
       : 1;
+    const canRefreshPrice = ["Stock", "ETF", "Mutual Fund"].includes(position.type) &&
+      typeof series.latestPrice === "number" && Number.isFinite(series.latestPrice) &&
+      series.latestPrice > 0;
+    const latestPrice = canRefreshPrice ? series.latestPrice as number : position.price;
     return {
       ...position,
+      price: latestPrice,
+      marketValue: Math.abs(position.quantity * latestPrice * position.multiplier),
       volatility: Number.isFinite(volatility) && volatility > 0 ? volatility : position.volatility,
       beta: Number.isFinite(beta) ? beta : position.beta,
       delta: optionDelta ?? position.delta,

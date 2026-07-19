@@ -83,6 +83,9 @@ Prices and option premiums are illustrative inputs and can be edited.
 On load, eligible default rows replace their initial risk assumptions with
 historical volatility and SPY beta calculations. A row uses fallback values
 only when adequate market history is unavailable.
+Stocks, ETFs, and mutual funds also refresh from the latest available quote
+returned by the market-data feed. Treasury placeholders and sample options
+without exact tradable identifiers retain their editable illustrative prices.
 
 Import a Charles Schwab or Fidelity positions CSV directly. The importer recognizes
 their common Symbol, Description, Quantity, Price, and Market/Current Value column

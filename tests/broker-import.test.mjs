@@ -64,7 +64,7 @@ test("calculates missing broker risk factors from historical prices", () => {
     fetchedAt: "2026-03-02T00:00:00Z",
     mappings: { AAPL: "AAPL", SPY: "SPY" },
     series: [
-      { symbol: "AAPL", sourceSymbol: "AAPL", dates, adjustedClose: prices(marketReturns.map((value) => value * 2), 100) },
+      { symbol: "AAPL", sourceSymbol: "AAPL", dates, adjustedClose: prices(marketReturns.map((value) => value * 2), 100), latestPrice: 250 },
       { symbol: "SPY", sourceSymbol: "SPY", dates, adjustedClose: prices(marketReturns, 500) },
     ],
   };
@@ -72,6 +72,8 @@ test("calculates missing broker risk factors from historical prices", () => {
   assert.equal(enriched.riskSource, "historical");
   assert.ok(enriched.volatility > 0);
   assert.ok(Math.abs(enriched.beta - 2) < 1e-10);
+  assert.equal(enriched.price, 250);
+  assert.equal(enriched.marketValue, 25000);
 });
 
 test("builds an efficient frontier and locates the current portfolio", () => {
