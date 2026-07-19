@@ -588,7 +588,13 @@ export function RiskWorkbench() {
                     {position.marketPrice !== undefined ? (
                       <span className="market-quote">
                         <strong>{new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 4 }).format(position.marketPrice)}</strong>
-                        <em>{position.marketPriceSource === "black-scholes" ? "Black–Scholes fallback" : "Market quote"}</em>
+                        <em>{
+                          position.marketPriceSource === "black-scholes"
+                            ? "Black–Scholes fallback"
+                            : position.marketPriceSource === "treasury-curve"
+                              ? "Treasury curve model"
+                              : "Market quote"
+                        }</em>
                         <small>{position.marketPriceAt
                           ? new Date(position.marketPriceAt).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })
                           : "Latest available"}</small>
@@ -634,6 +640,8 @@ export function RiskWorkbench() {
           Stock, ETF, and mutual-fund prices refresh from the latest market feed.
           Stock and ETF options without quotes use a labeled Black–Scholes fallback;
           simplified option symbols assume 90 days to expiration.
+          Generic Treasury rows use a labeled zero-coupon approximation discounted
+          with the matching official Treasury par yield.
           Delta is 1.0 for cash instruments.
           Risk source identifies calculated, supplied, fallback, and sample values.
         </p>

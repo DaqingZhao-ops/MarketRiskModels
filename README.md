@@ -89,6 +89,10 @@ outside the equity-option fallback retain their editable illustrative prices.
 Stock and ETF options without a direct quote use a labeled Black-Scholes fallback.
 Simplified symbols such as `AAPL C250` assume 90 days to expiration; OCC symbols
 use their encoded expiration and strike.
+Generic `UST2Y`, `UST5Y`, `UST10Y`, and `UST20Y` rows use a clearly labeled
+Treasury curve model when an exact bond quote is unavailable. The fallback
+discounts $1 of principal as a zero-coupon exposure at the matching official
+U.S. Treasury par yield; it is an approximation, not a clean or dirty bond quote.
 
 Import a Charles Schwab or Fidelity positions CSV directly. The importer recognizes
 their common Symbol, Description, Quantity, Price, and Market/Current Value column

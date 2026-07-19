@@ -142,6 +142,42 @@ test("uses the Black-Scholes fallback for SPY ETF options", () => {
   assert.ok(enriched.delta < 0 && enriched.delta > -1);
 });
 
+test("uses the official Treasury curve as a labeled generic bond fallback", () => {
+  const dates = Array.from({ length: 61 }, (_, index) =>
+    new Date(Date.UTC(2026, 0, index + 1)).toISOString().slice(0, 10));
+  const adjustedClose = Array.from({ length: 61 }, (_, index) => 95 + Math.sin(index) * 0.5);
+  const bond = {
+    id: "ust10y",
+    symbol: "UST10Y",
+    type: "Bond",
+    quantity: 200000,
+    price: 0.96,
+    multiplier: 1,
+    marketValue: 192000,
+    volatility: 0.075,
+    beta: -0.12,
+    delta: 1,
+    riskSource: "historical-pending",
+  };
+  const [enriched] = enrichPositionsWithHistoricalRisk([bond], {
+    source: "test",
+    fetchedAt: "2026-07-17T00:00:00Z",
+    mappings: { UST10Y: "IEF", SPY: "SPY" },
+    series: [
+      { symbol: "UST10Y", sourceSymbol: "IEF", dates, adjustedClose },
+      { symbol: "SPY", sourceSymbol: "SPY", dates, adjustedClose: adjustedClose.map((price) => price * 5) },
+    ],
+    treasuryCurve: {
+      asOf: "2026-07-17T00:00:00Z",
+      yields: { UST2Y: 0.04, UST5Y: 0.041, UST10Y: 0.043, UST20Y: 0.048 },
+    },
+  });
+  assert.equal(enriched.marketPriceSource, "treasury-curve");
+  assert.ok(enriched.marketPrice > 0 && enriched.marketPrice < 1);
+  assert.equal(enriched.marketPriceAt, "2026-07-17T00:00:00Z");
+  assert.equal(enriched.price, enriched.marketPrice);
+});
+
 test("builds an efficient frontier and locates the current portfolio", () => {
   const dates = Array.from({ length: 91 }, (_, index) =>
     new Date(Date.UTC(2025, 0, index + 1)).toISOString().slice(0, 10));

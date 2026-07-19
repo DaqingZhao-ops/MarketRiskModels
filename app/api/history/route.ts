@@ -36,6 +36,35 @@ type YahooChart = {
   };
 };
 
+async function fetchTreasuryCurve() {
+  const now = new Date();
+  const month = `${now.getUTCFullYear()}${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
+  const url = new URL("https://home.treasury.gov/resource-center/data-chart-center/interest-rates/pages/xml");
+  url.searchParams.set("data", "daily_treasury_yield_curve");
+  url.searchParams.set("field_tdr_date_value_month", month);
+  const response = await fetch(url, { next: { revalidate: 21600 } });
+  if (!response.ok) throw new Error(`Treasury yield curve request failed (${response.status})`);
+  const xml = await response.text();
+  const entries = xml.match(/<entry>[\s\S]*?<\/entry>/gi) ?? [];
+  const latest = entries.at(-1);
+  if (!latest) throw new Error("Treasury yield curve returned no observations.");
+  const value = (field: string) => {
+    const match = latest.match(new RegExp(`<d:${field}[^>]*>([^<]+)<\\/d:${field}>`, "i"));
+    return match ? Number(match[1]) / 100 : Number.NaN;
+  };
+  const dateMatch = latest.match(/<d:NEW_DATE[^>]*>([^<]+)<\/d:NEW_DATE>/i);
+  const yields = {
+    UST2Y: value("BC_2YEAR"),
+    UST5Y: value("BC_5YEAR"),
+    UST10Y: value("BC_10YEAR"),
+    UST20Y: value("BC_20YEAR"),
+  };
+  if (Object.values(yields).some((yieldValue) => !Number.isFinite(yieldValue))) {
+    throw new Error("Treasury yield curve was missing a required maturity.");
+  }
+  return { asOf: dateMatch?.[1] ?? now.toISOString(), yields };
+}
+
 async function fetchSeries(symbol: string, period1: number, period2: number) {
   const mapped = sourceSymbol(symbol);
   const url = new URL(
@@ -93,9 +122,12 @@ export async function GET(request: NextRequest) {
   const period2 = Math.floor(Date.now() / 1000) + 86400;
   const period1 = period2 - 4 * 366 * 86400;
   try {
-    const results = await Promise.allSettled(
-      symbols.map((symbol) => fetchSeries(symbol, period1, period2)),
-    );
+    const [results, treasuryResult] = await Promise.all([
+      Promise.allSettled(symbols.map((symbol) => fetchSeries(symbol, period1, period2))),
+      symbols.some((symbol) => /^UST(2|5|10|20)Y$/.test(symbol))
+        ? fetchTreasuryCurve().catch(() => undefined)
+        : Promise.resolve(undefined),
+    ]);
     const series = results.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
     if (!series.length) throw new Error("No price history was returned for the imported positions.");
     return NextResponse.json({
@@ -103,6 +135,7 @@ export async function GET(request: NextRequest) {
       fetchedAt: new Date().toISOString(),
       mappings: Object.fromEntries(series.map((item) => [item.symbol, item.sourceSymbol])),
       series,
+      treasuryCurve: treasuryResult,
     });
   } catch (error) {
     return NextResponse.json(

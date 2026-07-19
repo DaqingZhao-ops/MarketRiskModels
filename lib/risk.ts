@@ -13,7 +13,7 @@ export type Position = {
   delta: number;
   marketPrice?: number;
   marketPriceAt?: string;
-  marketPriceSource?: "market" | "black-scholes";
+  marketPriceSource?: "market" | "black-scholes" | "treasury-curve";
   riskSource?: "provided" | "historical-pending" | "historical" | "fallback";
 };
 
@@ -34,6 +34,10 @@ export type HistoricalData = {
   fetchedAt: string;
   series: HistoricalSeries[];
   mappings: Record<string, string>;
+  treasuryCurve?: {
+    asOf: string;
+    yields: Record<string, number>;
+  };
 };
 
 export type RiskResult = {
@@ -131,21 +135,34 @@ export function enrichPositionsWithHistoricalRisk(
       : undefined;
     const hasModeledOptionPrice = typeof modeledOptionPrice === "number" &&
       Number.isFinite(modeledOptionPrice) && modeledOptionPrice >= 0;
+    const treasuryModelPrice = position.type === "Bond"
+      ? modelTreasuryPrice(position.symbol, history.treasuryCurve?.yields[position.symbol])
+      : undefined;
+    const hasTreasuryModelPrice = typeof treasuryModelPrice === "number" &&
+      Number.isFinite(treasuryModelPrice) && treasuryModelPrice > 0;
     const latestPrice = canRefreshPrice
       ? series.latestPrice as number
       : hasModeledOptionPrice
         ? modeledOptionPrice
-        : position.price;
+        : hasTreasuryModelPrice
+          ? treasuryModelPrice
+          : position.price;
     return {
       ...position,
       price: latestPrice,
-      marketPrice: canRefreshPrice || hasModeledOptionPrice ? latestPrice : undefined,
-      marketPriceAt: canRefreshPrice || hasModeledOptionPrice ? series.latestPriceAt : undefined,
+      marketPrice: canRefreshPrice || hasModeledOptionPrice || hasTreasuryModelPrice ? latestPrice : undefined,
+      marketPriceAt: hasTreasuryModelPrice
+        ? history.treasuryCurve?.asOf
+        : canRefreshPrice || hasModeledOptionPrice
+          ? series.latestPriceAt
+          : undefined,
       marketPriceSource: canRefreshPrice
         ? "market"
         : hasModeledOptionPrice
           ? "black-scholes"
-          : undefined,
+          : hasTreasuryModelPrice
+            ? "treasury-curve"
+            : undefined,
       marketValue: Math.abs(position.quantity * latestPrice * position.multiplier),
       volatility: Number.isFinite(volatility) && volatility > 0 ? volatility : position.volatility,
       beta: Number.isFinite(beta) ? beta : position.beta,
@@ -153,6 +170,12 @@ export function enrichPositionsWithHistoricalRisk(
       riskSource: "historical" as const,
     };
   });
+}
+
+function modelTreasuryPrice(symbol: string, annualYield?: number) {
+  const maturity = { UST2Y: 2, UST5Y: 5, UST10Y: 10, UST20Y: 20 }[symbol];
+  if (!maturity || annualYield === undefined || annualYield <= 0) return undefined;
+  return 1 / (1 + annualYield / 2) ** (maturity * 2);
 }
 
 function dailyReturns(series: HistoricalSeries) {
