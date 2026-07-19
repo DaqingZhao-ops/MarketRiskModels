@@ -82,6 +82,18 @@ export type EfficientFrontierResult = {
     targetWeight: number;
     change: number;
   }>;
+  allocationAlternatives: Array<{
+    name: string;
+    description: string;
+    point: FrontierPoint & { sharpe: number };
+    turnover: number;
+    changes: Array<{
+      symbol: string;
+      currentWeight: number;
+      proposedWeight: number;
+      change: number;
+    }>;
+  }>;
 };
 
 export const DEFAULT_POSITIONS: Position[] = [
@@ -407,21 +419,79 @@ export function calculateEfficientFrontier(
       currentWeights[index] += directionalExposure(position) / totalMarketValue;
     }
   }
-  const currentPoint = pointFor(currentWeights);
   const riskFreeRate = 0.043;
+  const positiveWeightTotal = currentWeights.reduce(
+    (sum, weight) => sum + Math.max(weight, 0),
+    0,
+  );
+  const allocationBaseWeights = positiveWeightTotal > 0
+    ? currentWeights.map((weight) => Math.max(weight, 0) / positiveWeightTotal)
+    : currentWeights.map(() => 1 / currentWeights.length);
+  const currentPoint = pointFor(allocationBaseWeights);
   const recommendations = uniqueSeries
     .map((series, index) => {
-      const change = maxSharpeWeights[index] - currentWeights[index];
+      const change = maxSharpeWeights[index] - allocationBaseWeights[index];
       return {
         symbol: series.sourceSymbol,
         action: (change >= 0 ? "Increase" : "Reduce") as "Increase" | "Reduce",
-        currentWeight: currentWeights[index],
+        currentWeight: allocationBaseWeights[index],
         targetWeight: maxSharpeWeights[index],
         change,
       };
     })
     .sort((left, right) => Math.abs(right.change) - Math.abs(left.change))
     .slice(0, 5);
+  const alternativeRandom = mulberry32(20260723 + uniqueSeries.length * 31);
+  const alternativeCandidates = Array.from({ length: 96 }, (_, candidateIndex) => {
+    const randomRaw = uniqueSeries.map(() =>
+      -Math.log(Math.max(alternativeRandom(), Number.EPSILON)));
+    const randomTotal = randomRaw.reduce((sum, weight) => sum + weight, 0);
+    const randomWeights = randomRaw.map((weight) => weight / randomTotal);
+    const weights = allocationBaseWeights.map((weight, index) =>
+      weight * 0.95 + maxSharpeWeights[index] * 0.04 + randomWeights[index] * 0.01);
+    const point = pointFor(weights);
+    return {
+      candidateIndex,
+      weights,
+      point,
+      sharpe: point.risk > 0 ? (point.return - riskFreeRate) / point.risk : -Infinity,
+    };
+  }).sort((left, right) => right.sharpe - left.sharpe);
+  const selectedAlternatives = [
+    alternativeCandidates[0],
+    alternativeCandidates.find((candidate) =>
+      candidate.candidateIndex !== alternativeCandidates[0].candidateIndex &&
+      candidate.weights.some((weight, index) =>
+        Math.abs(weight - alternativeCandidates[0].weights[index]) > 0.0005)) ??
+      alternativeCandidates[1],
+  ];
+  const alternativeNames = [
+    {
+      name: "Measured improvement",
+      description: "A 4% frontier tilt plus a 1% randomized diversification sleeve.",
+    },
+    {
+      name: "Diversified improvement",
+      description: "The same 5% change budget with a different randomized sleeve.",
+    },
+  ];
+  const allocationAlternatives = selectedAlternatives.map((candidate, alternativeIndex) => ({
+    ...alternativeNames[alternativeIndex],
+    point: { ...candidate.point, sharpe: candidate.sharpe },
+    turnover: candidate.weights.reduce(
+      (sum, weight, index) => sum + Math.abs(weight - allocationBaseWeights[index]),
+      0,
+    ) / 2,
+    changes: uniqueSeries
+      .map((series, index) => ({
+        symbol: series.sourceSymbol,
+        currentWeight: allocationBaseWeights[index],
+        proposedWeight: candidate.weights[index],
+        change: candidate.weights[index] - allocationBaseWeights[index],
+      }))
+      .sort((left, right) => Math.abs(right.change) - Math.abs(left.change))
+      .slice(0, 5),
+  }));
   return {
     cloud: portfolios.filter((_, index) => index % 14 === 0).slice(0, 400),
     frontier,
@@ -433,6 +503,7 @@ export function calculateEfficientFrontier(
     observations: commonDates.length - 1,
     excluded: [...new Set(excluded)],
     recommendations,
+    allocationAlternatives,
   };
 }
 

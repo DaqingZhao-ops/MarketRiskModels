@@ -217,6 +217,17 @@ test("builds an efficient frontier and locates the current portfolio", () => {
   assert.ok(result.cloud.length > 100);
   assert.ok(result.frontier.length > 1);
   assert.equal(result.recommendations.length, 3);
+  assert.equal(result.allocationAlternatives.length, 2);
+  assert.ok(result.allocationAlternatives.every((alternative) =>
+    alternative.turnover <= 0.0500001));
+  assert.ok(result.allocationAlternatives.every((alternative) =>
+    alternative.changes.length === 3));
+  assert.ok(result.allocationAlternatives.every((alternative) =>
+    alternative.point.sharpe >= result.current.sharpe));
+  assert.notDeepEqual(
+    result.allocationAlternatives[0].changes.map((change) => change.proposedWeight),
+    result.allocationAlternatives[1].changes.map((change) => change.proposedWeight),
+  );
   assert.ok(result.recommendations.every((item) => Number.isFinite(item.change)));
   assert.ok(Number.isFinite(result.current.risk));
   assert.ok(Number.isFinite(result.current.return));

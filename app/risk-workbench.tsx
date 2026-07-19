@@ -120,7 +120,12 @@ function EfficientFrontierChart({ data }: { data: EfficientFrontierResult }) {
   const width = 760;
   const height = 340;
   const margin = { top: 22, right: 24, bottom: 46, left: 64 };
-  const points = [...data.cloud, ...data.frontier, data.current];
+  const points = [
+    ...data.cloud,
+    ...data.frontier,
+    data.current,
+    ...data.allocationAlternatives.map((alternative) => alternative.point),
+  ];
   const maxRisk = Math.max(...points.map((point) => point.risk), 0.01) * 1.08;
   const minReturn = Math.min(...points.map((point) => point.return), 0) - 0.02;
   const maxReturn = Math.max(...points.map((point) => point.return), 0.01) + 0.02;
@@ -155,6 +160,23 @@ function EfficientFrontierChart({ data }: { data: EfficientFrontierResult }) {
       <circle cx={x(data.current.risk)} cy={y(data.current.return)} r="7" className="frontier-current-halo" />
       <circle cx={x(data.current.risk)} cy={y(data.current.return)} r="4" className="frontier-current" />
       <text x={x(data.current.risk) + 10} y={y(data.current.return) - 9} className="frontier-current-label">Current portfolio</text>
+      {data.allocationAlternatives.map((alternative, index) => (
+        <g key={alternative.name}>
+          <circle
+            cx={x(alternative.point.risk)}
+            cy={y(alternative.point.return)}
+            r="5"
+            className={`frontier-alternative frontier-alternative-${index + 1}`}
+          />
+          <text
+            x={x(alternative.point.risk) + 9}
+            y={y(alternative.point.return) + 14 + index * 10}
+            className="frontier-alternative-label"
+          >
+            Alternative {index + 1}
+          </text>
+        </g>
+      ))}
       <text x={width / 2} y={height - 3} textAnchor="middle" className="frontier-axis-label">Annualized volatility</text>
       <text transform={`translate(15 ${height / 2}) rotate(-90)`} textAnchor="middle" className="frontier-axis-label">Expected annual return</text>
     </svg>
@@ -770,9 +792,51 @@ export function RiskWorkbench() {
                 ))}
               </ol>
             </div>
+            <div className="allocation-alternatives">
+              <div className="allocation-alternatives-heading">
+                <p className="eyebrow">Incremental allocation ideas</p>
+                <h3>Two approximately 5% changes</h3>
+                <p>
+                  Both retain 95% of the current mapped allocation, tilt 4%
+                  toward the maximum-Sharpe portfolio, and reserve 1% for a
+                  small deterministic randomized change.
+                </p>
+              </div>
+              {frontier.allocationAlternatives.map((alternative, index) => (
+                <article key={alternative.name}>
+                  <header>
+                    <span>Alternative {index + 1}</span>
+                    <strong>{alternative.name}</strong>
+                  </header>
+                  <p>{alternative.description}</p>
+                  <dl>
+                    <div><dt>Turnover</dt><dd>{percent.format(alternative.turnover)}</dd></div>
+                    <div><dt>Return</dt><dd>{percent.format(alternative.point.return)}</dd></div>
+                    <div><dt>Volatility</dt><dd>{percent.format(alternative.point.risk)}</dd></div>
+                    <div><dt>Sharpe</dt><dd>{alternative.point.sharpe.toFixed(2)}</dd></div>
+                  </dl>
+                  <ol>
+                    {alternative.changes.map((change) => (
+                      <li key={change.symbol}>
+                        <strong>{change.symbol}</strong>
+                        <span className={change.change >= 0 ? "candidate-increase" : "candidate-reduce"}>
+                          {change.change >= 0 ? "+" : ""}{percent.format(change.change)}
+                        </span>
+                        <small>
+                          {percent.format(change.currentWeight)} →{" "}
+                          {percent.format(change.proposedWeight)}
+                        </small>
+                      </li>
+                    ))}
+                  </ol>
+                </article>
+              ))}
+            </div>
             <p className="frontier-note">
               Long-only simulated portfolios form the opportunity set and upper frontier.
-              The current portfolio dot uses position market values and delta-adjusted option exposure.
+              The current portfolio dot uses normalized positive mapped
+              delta-adjusted exposure; hedge exposures are excluded from the
+              long-only allocation comparison.
               Rebalancing candidates are the largest exposure gaps versus the simulated
               maximum-Sharpe portfolio, not investment recommendations.
               {frontier.excluded.length
