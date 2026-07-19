@@ -132,7 +132,6 @@ h1 {
   color: var(--green);
   font-size: 11px;
 }
-.import-control button:disabled { cursor: not-allowed; opacity: .55; }
 .notice { margin: 40px 4vw 0; color: var(--muted); font-size: 11px; }
 .import-status {
   margin: 14px 4vw -26px;

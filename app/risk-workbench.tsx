@@ -547,9 +547,12 @@ export function RiskWorkbench() {
   function selectImportFile(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     setSelectedImportFile(file);
-    setImportStatus(file
-      ? `${file.name} selected. Press “Import selected file” to replace the current default.`
-      : "");
+    if (file) {
+      setImportStatus(`${file.name} selected. Import starting automatically…`);
+      void importFile(file);
+    } else {
+      setImportStatus("No file was selected.");
+    }
   }
 
   async function importCsv() {
@@ -558,6 +561,10 @@ export function RiskWorkbench() {
       setImportStatus("Choose a Schwab, Fidelity, or app CSV file first.");
       return;
     }
+    await importFile(file);
+  }
+
+  async function importFile(file: File) {
     setImportStatus(`Reading ${file.name}…`);
     let parsed: Position[];
     try {
@@ -674,8 +681,8 @@ export function RiskWorkbench() {
             accept=".csv,text/csv"
             onChange={selectImportFile}
           />
-          <button type="button" disabled={!selectedImportFile} onClick={importCsv}>
-            Import selected file
+          <button type="button" onClick={importCsv}>
+            {selectedImportFile ? "Retry selected file" : "Import selected file"}
           </button>
         </div>
       </section>
