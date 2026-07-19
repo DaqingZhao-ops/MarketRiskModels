@@ -4,20 +4,27 @@ export type HullWhiteCurvePoint = {
   discountFactor: number;
 };
 
-export type HullWhiteCalibration = {
+export type RateModelName = "Hull-White 1F" | "G2++ 2F";
+
+export type InterestRateCalibration = {
   id: string;
-  model: "Hull-White 1F";
+  model: RateModelName;
   version: string;
   curveDate: string;
   calibratedAt: string;
   meanReversion: number;
   volatility: number;
+  secondFactorMeanReversion?: number;
+  secondFactorVolatility?: number;
+  factorCorrelation?: number;
   parameterSource: "governed-default";
   curveSource: string;
   curve: HullWhiteCurvePoint[];
   fitRmse: number;
   status: "valid";
 };
+
+export type HullWhiteCalibration = InterestRateCalibration;
 
 export function fitHullWhiteCurve(
   yields: Array<{ maturity: number; yield: number }>,
@@ -45,6 +52,24 @@ export function fitHullWhiteCurve(
     curve,
     fitRmse: 0,
     status: "valid",
+  };
+}
+
+export function fitG2Curve(
+  yields: Array<{ maturity: number; yield: number }>,
+  curveDate: string,
+  calibratedAt = new Date().toISOString(),
+): InterestRateCalibration {
+  return {
+    ...fitHullWhiteCurve(yields, curveDate, calibratedAt),
+    id: crypto.randomUUID(),
+    model: "G2++ 2F",
+    version: "1.0",
+    meanReversion: 0.10,
+    volatility: 0.01,
+    secondFactorMeanReversion: 0.30,
+    secondFactorVolatility: 0.015,
+    factorCorrelation: -0.70,
   };
 }
 
@@ -107,7 +132,27 @@ export function hullWhiteBondOption(
   const varianceIntegral = Math.abs(a) < 1e-8
     ? optionExpiry
     : (1 - Math.exp(-2 * a * optionExpiry)) / (2 * a);
-  const priceVolatility = sigma * b * Math.sqrt(varianceIntegral);
+  let variance = sigma ** 2 * b ** 2 * varianceIntegral;
+  if (calibration.model === "G2++ 2F") {
+    const secondMeanReversion = calibration.secondFactorMeanReversion ?? 0.30;
+    const secondVolatility = calibration.secondFactorVolatility ?? 0.015;
+    const correlation = calibration.factorCorrelation ?? -0.70;
+    const secondB = Math.abs(secondMeanReversion) < 1e-8
+      ? bondMaturity - optionExpiry
+      : (1 - Math.exp(-secondMeanReversion * (bondMaturity - optionExpiry))) /
+        secondMeanReversion;
+    const secondIntegral = Math.abs(secondMeanReversion) < 1e-8
+      ? optionExpiry
+      : (1 - Math.exp(-2 * secondMeanReversion * optionExpiry)) /
+        (2 * secondMeanReversion);
+    const crossDecay = a + secondMeanReversion;
+    const crossIntegral = Math.abs(crossDecay) < 1e-8
+      ? optionExpiry
+      : (1 - Math.exp(-crossDecay * optionExpiry)) / crossDecay;
+    variance += secondVolatility ** 2 * secondB ** 2 * secondIntegral +
+      2 * correlation * sigma * secondVolatility * b * secondB * crossIntegral;
+  }
+  const priceVolatility = Math.sqrt(Math.max(variance, 0));
   if (priceVolatility <= 0) return undefined;
   const h = Math.log(bondDiscount / (strike * optionDiscount)) / priceVolatility +
     priceVolatility / 2;
