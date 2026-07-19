@@ -75,3 +75,23 @@ def test_parametric_result_scales_with_horizon() -> None:
     )
     assert abs(ten_day.var / one_day.var - 10**0.5) < 1e-10
 
+
+def test_same_symbol_across_accounts_uses_one_market_risk_factor() -> None:
+    combined = Position(
+        id="combined", symbol="AAPL", type="Stock",
+        market_value=2_000, volatility=0.2, beta=1, delta=1,
+    )
+    split = [
+        Position(
+            id=f"account-{account}", symbol="AAPL", type="Stock",
+            market_value=1_000, volatility=0.2, beta=1, delta=1,
+        )
+        for account in ("a", "b")
+    ]
+    combined_result = calculate_risk(RiskRequest(
+        positions=[combined], model="parametric", confidence=0.99, horizon=1,
+    ))
+    split_result = calculate_risk(RiskRequest(
+        positions=split, model="parametric", confidence=0.99, horizon=1,
+    ))
+    assert abs(split_result.daily_volatility - combined_result.daily_volatility) < 1e-6
