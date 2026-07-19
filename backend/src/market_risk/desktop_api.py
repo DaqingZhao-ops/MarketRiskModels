@@ -1,3 +1,4 @@
+import asyncio
 import math
 import re
 from datetime import datetime, timezone
@@ -129,13 +130,13 @@ async def market_history(
 
 RATE_MODELS = {"Hull-White 1F", "G2++ 2F"}
 HW_BOUNDS = {
-    "meanReversion": [0.01, 1.50],
+    "meanReversion": [0.001, 5.00],
     "volatility": [0.001, 0.10],
 }
 G2_BOUNDS = {
-    "meanReversion": [0.01, 1.50],
+    "meanReversion": [0.001, 5.00],
     "volatility": [0.001, 0.10],
-    "secondFactorMeanReversion": [0.01, 2.00],
+    "secondFactorMeanReversion": [0.001, 5.00],
     "secondFactorVolatility": [0.001, 0.10],
     "factorCorrelation": [-0.95, 0.95],
 }
@@ -148,16 +149,43 @@ def _bounded(value: float, bounds: list[float]) -> float:
 def _fit_mean_reverting_factor(
     values: np.ndarray,
     bounds: list[float],
-) -> tuple[float, np.ndarray]:
+) -> tuple[float, np.ndarray, list[float]]:
     centered = values - values.mean()
     lagged = centered[:-1]
     current = centered[1:]
     denominator = float(lagged @ lagged)
     phi = float(lagged @ current / denominator) if denominator > 1e-14 else 0.99
     phi = max(0.001, min(0.99996, phi))
-    mean_reversion = _bounded(-math.log(phi) * 252, bounds)
+    raw_mean_reversion = -math.log(phi) * 252
+    mean_reversion = _bounded(raw_mean_reversion, bounds)
     innovations = current - math.exp(-mean_reversion / 252) * lagged
-    return mean_reversion, innovations
+    phi_standard_error = math.sqrt(max(1 - phi ** 2, 1e-12) / len(lagged))
+    phi_low = max(0.001, phi - 1.96 * phi_standard_error)
+    phi_high = min(0.999999, phi + 1.96 * phi_standard_error)
+    confidence_interval = [
+        _bounded(-math.log(phi_high) * 252, bounds),
+        _bounded(-math.log(phi_low) * 252, bounds),
+    ]
+    return mean_reversion, innovations, confidence_interval
+
+
+def _principal_curve_factors(matrix: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    centered = matrix - matrix.mean(axis=0)
+    _, _, right_vectors = np.linalg.svd(centered, full_matrices=False)
+    loadings = right_vectors[:2].T
+    scores = centered @ loadings
+
+    level_scale = float(loadings[:, 0].mean())
+    if abs(level_scale) < 1e-8:
+        level_scale = float(np.linalg.norm(loadings[:, 0]))
+    slope_scale = float(loadings[-2:, 1].mean() - loadings[3:5, 1].mean())
+    if abs(slope_scale) < 1e-8:
+        slope_scale = float(np.linalg.norm(loadings[:, 1]))
+    factors = np.column_stack([
+        scores[:, 0] * level_scale,
+        scores[:, 1] * slope_scale,
+    ])
+    return factors, loadings
 
 
 def estimate_hull_white_parameters(
@@ -168,26 +196,29 @@ def estimate_hull_white_parameters(
     matrix = np.asarray([values for _, values in observations], dtype=float) / 100
     if matrix.ndim != 2 or matrix.shape[1] < 4 or not np.isfinite(matrix).all():
         raise ValueError("Treasury history contains invalid curve observations.")
-    level = matrix.mean(axis=1)
-    mean_reversion, innovations = _fit_mean_reverting_factor(
-        level,
+    factors, loadings = _principal_curve_factors(matrix)
+    mean_reversion, innovations, confidence_interval = _fit_mean_reverting_factor(
+        factors[:, 0],
         HW_BOUNDS["meanReversion"],
     )
     volatility = _bounded(
         float(np.std(innovations, ddof=1) * np.sqrt(252)),
         HW_BOUNDS["volatility"],
     )
-    fitted_level = np.repeat(level[:, None], matrix.shape[1], axis=1)
+    centered = matrix - matrix.mean(axis=0)
+    first_scores = centered @ loadings[:, 0]
+    fitted_level = matrix.mean(axis=0) + np.outer(first_scores, loadings[:, 0])
     rmse_basis_points = float(np.sqrt(np.mean((matrix - fitted_level) ** 2)) * 10_000)
     return {
         "meanReversion": mean_reversion,
         "volatility": volatility,
+        "meanReversionConfidenceInterval": confidence_interval,
         "fitRmse": rmse_basis_points,
         "observationCount": len(observations),
         "calibrationWindowStart": observations[0][0],
         "calibrationWindowEnd": observations[-1][0],
         "calibrationSource": "U.S. Treasury daily par-yield curve history",
-        "calibrationObjective": "One-factor AR(1) proxy on curve level",
+        "calibrationObjective": "PCA level factor with exact-discrete OU estimation",
         "parameterBounds": HW_BOUNDS,
         "fallbackUsed": False,
     }
@@ -202,15 +233,13 @@ def estimate_g2_parameters(
     if matrix.ndim != 2 or matrix.shape[1] < 4 or not np.isfinite(matrix).all():
         raise ValueError("Treasury history contains invalid curve observations.")
 
-    level = matrix.mean(axis=1)
-    slope = matrix[:, -2:].mean(axis=1) - matrix[:, 3:5].mean(axis=1)
-    factors = np.column_stack([level, slope])
+    factors, _ = _principal_curve_factors(matrix)
 
-    first_mean_reversion, first_innovations = _fit_mean_reverting_factor(
+    first_mean_reversion, first_innovations, first_confidence_interval = _fit_mean_reverting_factor(
         factors[:, 0],
         G2_BOUNDS["meanReversion"],
     )
-    second_mean_reversion, second_innovations = _fit_mean_reverting_factor(
+    second_mean_reversion, second_innovations, second_confidence_interval = _fit_mean_reverting_factor(
         factors[:, 1],
         G2_BOUNDS["secondFactorMeanReversion"],
     )
@@ -237,12 +266,14 @@ def estimate_g2_parameters(
         "secondFactorMeanReversion": second_mean_reversion,
         "secondFactorVolatility": second_volatility,
         "factorCorrelation": correlation,
+        "meanReversionConfidenceInterval": first_confidence_interval,
+        "secondFactorMeanReversionConfidenceInterval": second_confidence_interval,
         "fitRmse": rmse_basis_points,
         "observationCount": len(observations),
         "calibrationWindowStart": observations[0][0],
         "calibrationWindowEnd": observations[-1][0],
         "calibrationSource": "U.S. Treasury daily par-yield curve history",
-        "calibrationObjective": "Two-factor AR(1) proxy on curve level and long-end–intermediate slope",
+        "calibrationObjective": "Two PCA curve factors with exact-discrete OU estimation",
         "parameterBounds": G2_BOUNDS,
         "fallbackUsed": False,
     }
@@ -256,7 +287,7 @@ async def fetch_treasury_history() -> list[tuple[str, list[float]]]:
     ]
     observations: list[tuple[str, list[float]]] = []
     async with httpx.AsyncClient(timeout=30) as client:
-        for year in [now.year - 1, now.year]:
+        async def fetch_year(year: int) -> str:
             response = await client.get(
                 "https://home.treasury.gov/resource-center/data-chart-center/interest-rates/pages/xml",
                 params={
@@ -265,7 +296,12 @@ async def fetch_treasury_history() -> list[tuple[str, list[float]]]:
                 },
             )
             response.raise_for_status()
-            for entry in re.findall(r"<entry>[\s\S]*?</entry>", response.text, flags=re.IGNORECASE):
+            return response.text
+
+        years = list(range(now.year - 9, now.year + 1))
+        responses = await asyncio.gather(*(fetch_year(year) for year in years))
+        for response_text in responses:
+            for entry in re.findall(r"<entry>[\s\S]*?</entry>", response_text, flags=re.IGNORECASE):
                 date_match = re.search(
                     r"<d:NEW_DATE[^>]*>([^<]+)</d:NEW_DATE>",
                     entry,
@@ -322,7 +358,7 @@ async def treasury_calibration(model: str) -> dict[str, Any]:
     calibration = {
         "id": str(uuid4()),
         "model": model,
-        "version": "1.0",
+        "version": "1.1",
         "curveDate": date_match.group(1) if date_match else now.isoformat(),
         "calibratedAt": now.isoformat(),
         "meanReversion": 0.03,
@@ -392,7 +428,10 @@ async def get_rates(
         )
         if item.payload.get("model") == model
     ), None)
-    if stored and stored.payload.get("parameterSource") == "governed-default":
+    if stored and (
+        stored.payload.get("parameterSource") == "governed-default"
+        or stored.payload.get("version") != "1.1"
+    ):
         stored = None
     calibration = stored.payload if stored else await refresh_rate_calibration(session, model)
     calibrated = datetime.fromisoformat(calibration["calibratedAt"])

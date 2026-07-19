@@ -26,6 +26,8 @@ export type InterestRateCalibration = {
   parameterBounds?: Record<string, [number, number]>;
   fallbackUsed?: boolean;
   fallbackReason?: string;
+  meanReversionConfidenceInterval?: [number, number];
+  secondFactorMeanReversionConfidenceInterval?: [number, number];
   curveSource: string;
   curve: HullWhiteCurvePoint[];
   fitRmse: number;

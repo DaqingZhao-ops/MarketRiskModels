@@ -765,8 +765,8 @@ export function RiskWorkbench() {
           <h2 id="rate-model-title">{selectedRateModel}</h2>
           <p>
             {selectedRateModel === "G2++ 2F"
-              ? "Two correlated mean-reverting factors represent level and slope movements while fitting the observed Treasury curve."
-              : "One mean-reverting factor fits the observed Treasury curve with a transparent governed parameter set."}
+              ? "Two correlated PCA factors represent level and slope movements, with dynamics estimated from ten years of Treasury curves."
+              : "One PCA level factor fits the Treasury curve, with dynamics estimated from ten years of observations."}
           </p>
           <label htmlFor="rate-model-select">Interest-rate model</label>
           <select
@@ -787,22 +787,31 @@ export function RiskWorkbench() {
           <dl>
             <div><dt>Curve date</dt><dd>{new Date(rateCalibration.curveDate).toLocaleDateString()}</dd></div>
             <div><dt>Calibrated</dt><dd>{new Date(rateCalibration.calibratedAt).toLocaleString()}</dd></div>
-            <div><dt>Mean reversion (a)</dt><dd>{percent.format(rateCalibration.meanReversion)}</dd></div>
+            <div><dt>Mean reversion (a)</dt><dd>{rateCalibration.meanReversion.toFixed(3)} /yr</dd></div>
             <div><dt>Volatility (σ)</dt><dd>{percent.format(rateCalibration.volatility)}</dd></div>
             {rateCalibration.model === "G2++ 2F" ? (
               <>
-                <div><dt>Second mean reversion (b)</dt><dd>{percent.format(rateCalibration.secondFactorMeanReversion ?? 0)}</dd></div>
+                <div><dt>Second mean reversion (b)</dt><dd>{(rateCalibration.secondFactorMeanReversion ?? 0).toFixed(3)} /yr</dd></div>
                 <div><dt>Second volatility (η)</dt><dd>{percent.format(rateCalibration.secondFactorVolatility ?? 0)}</dd></div>
                 <div><dt>Factor correlation (ρ)</dt><dd>{(rateCalibration.factorCorrelation ?? 0).toFixed(2)}</dd></div>
               </>
             ) : null}
             <div><dt>Curve nodes</dt><dd>{rateCalibration.curve.length}</dd></div>
             <div><dt>Parameter source</dt><dd>{rateCalibration.calibrationSource ?? (rateCalibration.parameterSource === "governed-default" ? "Governed default" : rateCalibration.parameterSource)}</dd></div>
+            {rateCalibration.calibrationObjective ? (
+              <div><dt>Method</dt><dd>{rateCalibration.calibrationObjective}</dd></div>
+            ) : null}
             {rateCalibration.observationCount ? (
               <div><dt>Observations</dt><dd>{rateCalibration.observationCount.toLocaleString()}</dd></div>
             ) : null}
             {rateCalibration.calibrationWindowStart && rateCalibration.calibrationWindowEnd ? (
               <div><dt>Calibration window</dt><dd>{rateCalibration.calibrationWindowStart} to {rateCalibration.calibrationWindowEnd}</dd></div>
+            ) : null}
+            {rateCalibration.meanReversionConfidenceInterval ? (
+              <div><dt>a 95% interval</dt><dd>{rateCalibration.meanReversionConfidenceInterval.map((value) => value.toFixed(3)).join("–")} /yr</dd></div>
+            ) : null}
+            {rateCalibration.secondFactorMeanReversionConfidenceInterval ? (
+              <div><dt>b 95% interval</dt><dd>{rateCalibration.secondFactorMeanReversionConfidenceInterval.map((value) => value.toFixed(3)).join("–")} /yr</dd></div>
             ) : null}
             <div><dt>Historical fit RMSE</dt><dd>{rateCalibration.fitRmse.toFixed(2)} bp</dd></div>
             {rateCalibration.fallbackUsed ? (

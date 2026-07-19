@@ -100,7 +100,7 @@ def test_saves_hull_white_and_g2_calibrations_independently(monkeypatch) -> None
         return {
             "id": f"id-{model}",
             "model": model,
-            "version": "1.0",
+            "version": "1.1",
             "curveDate": "2026-07-19T00:00:00+00:00",
             "calibratedAt": "2026-07-19T12:00:00+00:00",
             "meanReversion": 0.1 if model == "G2++ 2F" else 0.03,
@@ -151,9 +151,9 @@ def test_estimates_bounded_g2_parameters_from_treasury_history() -> None:
 
     assert result["observationCount"] == 260
     assert result["fallbackUsed"] is False
-    assert 0.01 <= result["meanReversion"] <= 1.50
+    assert 0.001 <= result["meanReversion"] <= 5.00
     assert 0.001 <= result["volatility"] <= 0.10
-    assert 0.01 <= result["secondFactorMeanReversion"] <= 2.00
+    assert 0.001 <= result["secondFactorMeanReversion"] <= 5.00
     assert 0.001 <= result["secondFactorVolatility"] <= 0.10
     assert -0.95 <= result["factorCorrelation"] <= 0.95
     assert result["fitRmse"] >= 0
@@ -171,6 +171,6 @@ def test_estimates_hull_white_parameters_from_treasury_history() -> None:
 
     assert result["observationCount"] == 180
     assert result["fallbackUsed"] is False
-    assert 0.01 <= result["meanReversion"] <= 1.50
+    assert 0.001 <= result["meanReversion"] <= 5.00
     assert 0.001 <= result["volatility"] <= 0.10
     assert result["fitRmse"] >= 0
