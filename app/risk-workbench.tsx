@@ -219,6 +219,7 @@ export function RiskWorkbench() {
   const [history, setHistory] = useState<HistoricalData>();
   const [marketBriefing, setMarketBriefing] = useState<MarketBriefing>();
   const [marketBriefingError, setMarketBriefingError] = useState("");
+  const [marketBriefingRefreshing, setMarketBriefingRefreshing] = useState(false);
   const [historyStatus, setHistoryStatus] = useState("Loading market history…");
   const [remoteResult, setRemoteResult] = useState<RiskResult>();
   const [engineStatus, setEngineStatus] = useState("Connecting to Python engine…");
@@ -242,20 +243,29 @@ export function RiskWorkbench() {
 
   useEffect(() => {
     const controller = new AbortController();
-    void fetch(apiUrl("/api/market/briefing"), { signal: controller.signal })
-      .then(async (response) => {
-        const payload = await response.json();
-        if (!response.ok) throw new Error(payload.detail ?? "Market briefing is unavailable.");
-        setMarketBriefing(payload as MarketBriefing);
-        setMarketBriefingError("");
-      })
-      .catch((error) => {
-        if (!controller.signal.aborted) {
-          setMarketBriefingError(error instanceof Error ? error.message : "Market briefing is unavailable.");
-        }
-      });
+    void refreshMarketBriefing(controller.signal);
     return () => controller.abort();
   }, []);
+
+  async function refreshMarketBriefing(signal?: AbortSignal) {
+    setMarketBriefingRefreshing(true);
+    setMarketBriefingError("");
+    try {
+      const response = await fetch(apiUrl("/api/market/briefing"), {
+        signal,
+        cache: "no-store",
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.detail ?? "Market briefing is unavailable.");
+      setMarketBriefing(payload as MarketBriefing);
+    } catch (error) {
+      if (!signal?.aborted) {
+        setMarketBriefingError(error instanceof Error ? error.message : "Market briefing is unavailable.");
+      }
+    } finally {
+      if (!signal?.aborted) setMarketBriefingRefreshing(false);
+    }
+  }
 
   useEffect(() => {
     const controller = new AbortController();
@@ -766,6 +776,13 @@ export function RiskWorkbench() {
           <header>
             <span>Yahoo Finance headlines</span>
             <small>{marketBriefing ? `Updated ${new Date(marketBriefing.fetchedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : "Loading…"}</small>
+            <button
+              type="button"
+              onClick={() => void refreshMarketBriefing()}
+              disabled={marketBriefingRefreshing}
+            >
+              {marketBriefingRefreshing ? "Refreshing…" : "Refresh market data"}
+            </button>
           </header>
           {marketBriefing?.headlines.length ? (
             <ol>
