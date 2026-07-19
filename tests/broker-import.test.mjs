@@ -7,6 +7,12 @@ import {
   enrichPositionsWithHistoricalRisk,
   parsePositionsCsv,
 } from "../lib/risk.ts";
+import {
+  fitHullWhiteCurve,
+  hullWhiteBondOption,
+  hullWhiteDiscountFactor,
+  isHullWhiteStale,
+} from "../lib/hull-white.ts";
 
 test("imports a Fidelity positions export", () => {
   const csv = `Account Number,Account Name,Symbol,Description,Quantity,Last Price,Current Value,Type
@@ -285,4 +291,47 @@ test("retries fallback risk factors when history later becomes available", () =>
     ],
   });
   assert.equal(enriched.riskSource, "historical");
+});
+
+test("fits and interpolates a Hull-White initial discount curve", () => {
+  const calibration = fitHullWhiteCurve([
+    { maturity: 1, yield: 0.04 },
+    { maturity: 2, yield: 0.041 },
+    { maturity: 5, yield: 0.043 },
+    { maturity: 10, yield: 0.045 },
+  ], "2026-07-17T00:00:00Z", "2026-07-19T12:00:00Z");
+  assert.equal(calibration.model, "Hull-White 1F");
+  assert.equal(calibration.meanReversion, 0.03);
+  assert.equal(calibration.volatility, 0.01);
+  assert.equal(calibration.fitRmse, 0);
+  assert.equal(
+    hullWhiteDiscountFactor(calibration, 2),
+    1 / (1 + 0.041 / 2) ** 4,
+  );
+  const interpolated = hullWhiteDiscountFactor(calibration, 3);
+  assert.ok(interpolated > calibration.curve[2].discountFactor);
+  assert.ok(interpolated < calibration.curve[1].discountFactor);
+  assert.equal(isHullWhiteStale(calibration, new Date("2026-07-20T11:59:59Z")), false);
+  assert.equal(isHullWhiteStale(calibration, new Date("2026-07-20T12:00:01Z")), true);
+});
+
+test("prices zero-coupon bond options with Hull-White dynamics", () => {
+  const calibration = fitHullWhiteCurve([
+    { maturity: 0.25, yield: 0.04 },
+    { maturity: 1, yield: 0.041 },
+    { maturity: 5, yield: 0.043 },
+    { maturity: 10, yield: 0.045 },
+  ], "2026-07-17T00:00:00Z");
+  const call = hullWhiteBondOption(calibration, 0.25, 10, 0.65, "C");
+  const put = hullWhiteBondOption(calibration, 0.25, 10, 0.65, "P");
+  assert.ok(call && put);
+  assert.ok(call.price >= 0);
+  assert.ok(put.price >= 0);
+  assert.ok(call.delta > 0 && call.delta < 1);
+  assert.ok(put.delta < 0 && put.delta > -1);
+  const optionDiscount = hullWhiteDiscountFactor(calibration, 0.25);
+  const bondDiscount = hullWhiteDiscountFactor(calibration, 10);
+  assert.ok(Math.abs(
+    (call.price - put.price) - (bondDiscount - 0.65 * optionDiscount),
+  ) < 1e-10);
 });

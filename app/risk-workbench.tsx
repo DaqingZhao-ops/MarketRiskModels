@@ -13,6 +13,10 @@ import {
   enrichPositionsWithHistoricalRisk,
   parsePositionsCsv,
 } from "../lib/risk";
+import {
+  type HullWhiteCalibration,
+  isHullWhiteStale,
+} from "../lib/hull-white";
 
 const money = new Intl.NumberFormat("en-US", {
   style: "currency",
@@ -153,6 +157,10 @@ export function RiskWorkbench() {
   const [portfolioVersions, setPortfolioVersions] = useState<PortfolioVersion[]>([]);
   const [selectedVersionId, setSelectedVersionId] = useState("");
   const [portfolioSaveStatus, setPortfolioSaveStatus] = useState("Loading saved default…");
+  const [rateCalibration, setRateCalibration] = useState<HullWhiteCalibration>();
+  const [rateModelLoaded, setRateModelLoaded] = useState(false);
+  const [rateModelStatus, setRateModelStatus] = useState("Loading stored calibration…");
+  const [refreshingRateModel, setRefreshingRateModel] = useState(false);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -183,6 +191,27 @@ export function RiskWorkbench() {
     return () => controller.abort();
   }, []);
 
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetch("/api/rates", { signal: controller.signal })
+      .then(async (response) => {
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.error ?? "Unable to load the interest-rate model.");
+        setRateCalibration(payload.calibration as HullWhiteCalibration);
+        setRateModelStatus(payload.stale
+          ? "Stored calibration is more than 24 hours old."
+          : "Stored calibration is current.");
+      })
+      .catch((error) => {
+        if (controller.signal.aborted) return;
+        setRateModelStatus(error instanceof Error ? error.message : "Unable to load the interest-rate model.");
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setRateModelLoaded(true);
+      });
+    return () => controller.abort();
+  }, []);
+
   const symbolsKey = useMemo(
     () => [...new Set([
       ...positions.map((position) => position.symbol.trim().toUpperCase()),
@@ -194,7 +223,7 @@ export function RiskWorkbench() {
   );
 
   useEffect(() => {
-    if (!symbolsKey) return;
+    if (!symbolsKey || !rateModelLoaded) return;
     const controller = new AbortController();
     const timer = window.setTimeout(async () => {
       setHistoryStatus("Loading market history…");
@@ -205,7 +234,13 @@ export function RiskWorkbench() {
         const payload = await response.json();
         if (!response.ok) throw new Error(payload.error ?? "Unable to load market history.");
         setHistory(payload as HistoricalData);
-        setPositions((current) => enrichPositionsWithHistoricalRisk(current, payload as HistoricalData));
+        setPositions((current) =>
+          enrichPositionsWithHistoricalRisk(
+            current,
+            payload as HistoricalData,
+            new Date(),
+            rateCalibration,
+          ));
         setHistoryStatus("Latest eligible prices and market history loaded.");
       } catch (error) {
         if (controller.signal.aborted) return;
@@ -217,7 +252,7 @@ export function RiskWorkbench() {
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [symbolsKey]);
+  }, [symbolsKey, rateCalibration, rateModelLoaded]);
 
   const continuityResult: RiskResult = useMemo(
     () => calculateRisk(positions, model, confidence, horizon, history),
@@ -373,6 +408,29 @@ export function RiskWorkbench() {
     }
   }
 
+  async function refreshRateModel() {
+    setRefreshingRateModel(true);
+    setRateModelStatus("Refreshing the Treasury curve and storing a new calibration…");
+    try {
+      const response = await fetch("/api/rates", { method: "POST" });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error ?? "Unable to refresh Hull–White calibration.");
+      const calibration = payload.calibration as HullWhiteCalibration;
+      setRateCalibration(calibration);
+      setPositions((current) => current.map((position) =>
+        position.type === "Bond" && position.riskSource !== "provided"
+          ? { ...position, riskSource: "historical-pending" as const }
+          : position));
+      setRateModelStatus("New calibration stored successfully.");
+    } catch (error) {
+      setRateModelStatus(
+        `${error instanceof Error ? error.message : "Refresh failed."} The last valid calibration remains active.`,
+      );
+    } finally {
+      setRefreshingRateModel(false);
+    }
+  }
+
   async function importCsv(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -473,6 +531,40 @@ export function RiskWorkbench() {
             : ""}`
           : message}
       </p>
+
+      <section className="rate-model" aria-labelledby="rate-model-title">
+        <div>
+          <p className="eyebrow">Interest-rate model</p>
+          <h2 id="rate-model-title">Hull–White one factor</h2>
+          <p>
+            The stored model fits the observed Treasury term structure. Mean
+            reversion and volatility remain governed defaults until option-implied
+            volatility calibration is connected.
+          </p>
+        </div>
+        {rateCalibration ? (
+          <dl>
+            <div><dt>Curve date</dt><dd>{new Date(rateCalibration.curveDate).toLocaleDateString()}</dd></div>
+            <div><dt>Calibrated</dt><dd>{new Date(rateCalibration.calibratedAt).toLocaleString()}</dd></div>
+            <div><dt>Mean reversion (a)</dt><dd>{percent.format(rateCalibration.meanReversion)}</dd></div>
+            <div><dt>Volatility (σ)</dt><dd>{percent.format(rateCalibration.volatility)}</dd></div>
+            <div><dt>Curve nodes</dt><dd>{rateCalibration.curve.length}</dd></div>
+            <div><dt>Parameter source</dt><dd>Governed default</dd></div>
+          </dl>
+        ) : <p className="rate-model-empty">No valid stored calibration is available.</p>}
+        <div className="rate-model-action">
+          <button
+            className="secondary"
+            onClick={refreshRateModel}
+            disabled={refreshingRateModel}
+          >
+            {refreshingRateModel ? "Refreshing…" : "Refresh Hull–White model"}
+          </button>
+          <small className={rateCalibration && isHullWhiteStale(rateCalibration) ? "stale" : ""}>
+            {rateModelStatus}
+          </small>
+        </div>
+      </section>
 
       <section className="metrics" id="overview">
         <Metric
@@ -693,8 +785,10 @@ export function RiskWorkbench() {
                         <em>{
                           position.marketPriceSource === "black-scholes"
                             ? "Black–Scholes fallback"
+                            : position.marketPriceSource === "hull-white"
+                              ? "Hull–White option"
                             : position.marketPriceSource === "treasury-curve"
-                              ? "Treasury curve model"
+                              ? "Hull–White curve"
                               : "Market quote"
                         }</em>
                         <small>{position.marketPriceAt
@@ -742,8 +836,9 @@ export function RiskWorkbench() {
           Stock, ETF, and mutual-fund prices refresh from the latest market feed.
           Stock and ETF options without quotes use a labeled Black–Scholes fallback;
           simplified option symbols assume 90 days to expiration.
-          Generic Treasury rows use a labeled zero-coupon approximation discounted
-          with the matching official Treasury par yield.
+          Generic Treasury rows use the stored Hull–White initial discount curve;
+          mean reversion and volatility are retained for rate scenarios and
+          fixed-income option pricing.
           Delta is 1.0 for cash instruments.
           Risk source identifies calculated, supplied, fallback, and sample values.
         </p>
@@ -753,7 +848,7 @@ export function RiskWorkbench() {
         <p className="eyebrow">Model governance</p>
         <h2>Every number should explain itself.</h2>
         <div>
-          <article><span>01</span><h3>Exposure mapping</h3><p>Options use delta-adjusted exposure. Bonds use their supplied volatility and beta proxy until curve-factor data is connected.</p></article>
+          <article><span>01</span><h3>Exposure mapping</h3><p>Options use delta-adjusted exposure. Treasury prices use the persisted Hull–White initial curve; historical ETF proxies currently supply bond return risk.</p></article>
           <article><span>02</span><h3>Dependence</h3><p>Correlations are produced from a one-factor market structure, repaired to positive definiteness, then decomposed by Cholesky.</p></article>
           <article><span>03</span><h3>Tail measurement</h3><p>VaR is a loss quantile. Expected Shortfall is the mean of losses beyond that quantile and remains visible for every model.</p></article>
         </div>

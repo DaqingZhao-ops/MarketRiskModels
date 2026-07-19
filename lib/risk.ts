@@ -1,3 +1,9 @@
+import {
+  hullWhiteBondOption,
+  hullWhiteDiscountFactor,
+  type HullWhiteCalibration,
+} from "./hull-white.ts";
+
 export type ModelKind = "historical" | "monteCarlo" | "parametric";
 
 export type Position = {
@@ -13,7 +19,7 @@ export type Position = {
   delta: number;
   marketPrice?: number;
   marketPriceAt?: string;
-  marketPriceSource?: "market" | "black-scholes" | "treasury-curve";
+  marketPriceSource?: "market" | "black-scholes" | "treasury-curve" | "hull-white";
   riskSource?: "provided" | "historical-pending" | "historical" | "fallback";
 };
 
@@ -112,6 +118,7 @@ export function enrichPositionsWithHistoricalRisk(
   positions: Position[],
   history: HistoricalData,
   asOf = new Date(),
+  rateCalibration?: HullWhiteCalibration,
 ) {
   const benchmark = history.series.find((item) => item.symbol === "SPY");
   return positions.map((position) => {
@@ -124,6 +131,9 @@ export function enrichPositionsWithHistoricalRisk(
     const volatility = historicalDeviation(returns.map((item) => item.value)) * Math.sqrt(252);
     const beta = benchmark ? historicalBeta(series, benchmark) : position.beta;
     const underlyingPrice = series.latestPrice ?? series.adjustedClose.at(-1) ?? 0;
+    const hullWhiteOption = position.type === "Bond Option" && rateCalibration
+      ? modelHullWhiteBondOption(position.symbol, rateCalibration)
+      : undefined;
     const optionDelta = position.type.endsWith("Option")
       ? blackScholesDelta(position.symbol, underlyingPrice, volatility, asOf)
       : 1;
@@ -136,7 +146,11 @@ export function enrichPositionsWithHistoricalRisk(
     const hasModeledOptionPrice = typeof modeledOptionPrice === "number" &&
       Number.isFinite(modeledOptionPrice) && modeledOptionPrice >= 0;
     const treasuryModelPrice = position.type === "Bond"
-      ? modelTreasuryPrice(position.symbol, history.treasuryCurve?.yields[position.symbol])
+      ? modelTreasuryPrice(
+          position.symbol,
+          rateCalibration,
+          history.treasuryCurve?.yields[position.symbol],
+        )
       : undefined;
     const hasTreasuryModelPrice = typeof treasuryModelPrice === "number" &&
       Number.isFinite(treasuryModelPrice) && treasuryModelPrice > 0;
@@ -144,37 +158,68 @@ export function enrichPositionsWithHistoricalRisk(
       ? series.latestPrice as number
       : hasModeledOptionPrice
         ? modeledOptionPrice
+        : hullWhiteOption
+          ? hullWhiteOption.price
         : hasTreasuryModelPrice
           ? treasuryModelPrice
           : position.price;
     return {
       ...position,
       price: latestPrice,
-      marketPrice: canRefreshPrice || hasModeledOptionPrice || hasTreasuryModelPrice ? latestPrice : undefined,
+      marketPrice: canRefreshPrice || hasModeledOptionPrice || hullWhiteOption || hasTreasuryModelPrice
+        ? latestPrice
+        : undefined,
       marketPriceAt: hasTreasuryModelPrice
         ? history.treasuryCurve?.asOf
-        : canRefreshPrice || hasModeledOptionPrice
+        : canRefreshPrice || hasModeledOptionPrice || hullWhiteOption
           ? series.latestPriceAt
           : undefined,
       marketPriceSource: canRefreshPrice
         ? "market"
         : hasModeledOptionPrice
           ? "black-scholes"
+          : hullWhiteOption
+            ? "hull-white"
           : hasTreasuryModelPrice
             ? "treasury-curve"
             : undefined,
       marketValue: Math.abs(position.quantity * latestPrice * position.multiplier),
       volatility: Number.isFinite(volatility) && volatility > 0 ? volatility : position.volatility,
       beta: Number.isFinite(beta) ? beta : position.beta,
-      delta: optionDelta ?? position.delta,
+      delta: hullWhiteOption?.delta ?? optionDelta ?? position.delta,
       riskSource: "historical" as const,
     };
   });
 }
 
-function modelTreasuryPrice(symbol: string, annualYield?: number) {
+function modelHullWhiteBondOption(
+  symbol: string,
+  calibration: HullWhiteCalibration,
+) {
+  const terms = symbol.trim().toUpperCase()
+    .match(/^UST(2|5|10|20)Y\s+([CP])(\d+(?:\.\d+)?)$/);
+  if (!terms) return undefined;
+  return hullWhiteBondOption(
+    calibration,
+    90 / 365.25,
+    Number(terms[1]),
+    Number(terms[3]),
+    terms[2] as "C" | "P",
+  );
+}
+
+function modelTreasuryPrice(
+  symbol: string,
+  calibration?: HullWhiteCalibration,
+  annualYield?: number,
+) {
   const maturity = { UST2Y: 2, UST5Y: 5, UST10Y: 10, UST20Y: 20 }[symbol];
-  if (!maturity || annualYield === undefined || annualYield <= 0) return undefined;
+  if (!maturity) return undefined;
+  const hullWhitePrice = calibration
+    ? hullWhiteDiscountFactor(calibration, maturity)
+    : undefined;
+  if (hullWhitePrice !== undefined) return hullWhitePrice;
+  if (annualYield === undefined || annualYield <= 0) return undefined;
   return 1 / (1 + annualYield / 2) ** (maturity * 2);
 }
 

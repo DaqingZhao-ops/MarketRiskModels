@@ -94,10 +94,13 @@ outside the equity-option fallback retain their editable illustrative prices.
 Stock and ETF options without a direct quote use a labeled Black-Scholes fallback.
 Simplified symbols such as `AAPL C250` assume 90 days to expiration; OCC symbols
 use their encoded expiration and strike.
-Generic `UST2Y`, `UST5Y`, `UST10Y`, and `UST20Y` rows use a clearly labeled
-Treasury curve model when an exact bond quote is unavailable. The fallback
-discounts $1 of principal as a zero-coupon exposure at the matching official
-U.S. Treasury par yield; it is an approximation, not a clean or dirty bond quote.
+Generic `UST2Y`, `UST5Y`, `UST10Y`, and `UST20Y` rows use a persisted
+Hull–White one-factor calibration when an exact bond quote is unavailable.
+The model fits its initial discount curve to official U.S. Treasury par-yield
+nodes. The current mean-reversion and volatility parameters are governed
+defaults (`a = 0.03`, `sigma = 0.01`) rather than option-implied calibrations.
+The interface displays the calibration timestamp and provides a manual refresh;
+each refresh stores a new auditable calibration while retaining prior records.
 TLT and IEF contracts are classified as ETF options and use the Black-Scholes
 fallback. The `Bond Option` class is reserved for genuine bond or Treasury
 contracts that require contract-specific terms and a fixed-income option model.
