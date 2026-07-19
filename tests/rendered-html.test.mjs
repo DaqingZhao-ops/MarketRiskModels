@@ -87,6 +87,8 @@ test("ships the requested default share quantities", async () => {
     assert.match(csv, new RegExp(`^${row}`, "m"));
   }
   assert.match(csv, /Stock Option/);
-  assert.match(csv, /Bond Option/);
+  assert.match(csv, /^TLT C100,ETF Option,/m);
+  assert.match(csv, /^TLT P80,ETF Option,/m);
+  assert.match(csv, /^IEF P90,ETF Option,/m);
   assert.match(csv, /^UST10Y,Bond,/m);
 });

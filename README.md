@@ -93,6 +93,9 @@ Generic `UST2Y`, `UST5Y`, `UST10Y`, and `UST20Y` rows use a clearly labeled
 Treasury curve model when an exact bond quote is unavailable. The fallback
 discounts $1 of principal as a zero-coupon exposure at the matching official
 U.S. Treasury par yield; it is an approximation, not a clean or dirty bond quote.
+TLT and IEF contracts are classified as ETF options and use the Black-Scholes
+fallback. The `Bond Option` class is reserved for genuine bond or Treasury
+contracts that require contract-specific terms and a fixed-income option model.
 
 Import a Charles Schwab or Fidelity positions CSV directly. The importer recognizes
 their common Symbol, Description, Quantity, Price, and Market/Current Value column

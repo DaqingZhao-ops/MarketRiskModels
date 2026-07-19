@@ -103,9 +103,9 @@ export const DEFAULT_POSITIONS: Position[] = [
   { id: "ust5y", symbol: "UST5Y", type: "Bond", quantity: 150000, price: 0.98, multiplier: 1, marketValue: 147000, volatility: 0.045, beta: -0.08, delta: 1 },
   { id: "ust10y", symbol: "UST10Y", type: "Bond", quantity: 200000, price: 0.96, multiplier: 1, marketValue: 192000, volatility: 0.075, beta: -0.12, delta: 1 },
   { id: "ust20y", symbol: "UST20Y", type: "Bond", quantity: 100000, price: 0.92, multiplier: 1, marketValue: 92000, volatility: 0.12, beta: -0.2, delta: 1 },
-  { id: "tlt-call", symbol: "TLT C100", type: "Bond Option", quantity: 20, price: 4.5, multiplier: 100, marketValue: 9000, volatility: 0.32, beta: -0.2, delta: 0.4 },
-  { id: "tlt-put", symbol: "TLT P80", type: "Bond Option", quantity: 25, price: 3.2, multiplier: 100, marketValue: 8000, volatility: 0.35, beta: -0.2, delta: -0.32 },
-  { id: "ief-put", symbol: "IEF P90", type: "Bond Option", quantity: 20, price: 2.4, multiplier: 100, marketValue: 4800, volatility: 0.2, beta: -0.12, delta: -0.25 },
+  { id: "tlt-call", symbol: "TLT C100", type: "ETF Option", quantity: 20, price: 4.5, multiplier: 100, marketValue: 9000, volatility: 0.32, beta: -0.2, delta: 0.4 },
+  { id: "tlt-put", symbol: "TLT P80", type: "ETF Option", quantity: 25, price: 3.2, multiplier: 100, marketValue: 8000, volatility: 0.35, beta: -0.2, delta: -0.32 },
+  { id: "ief-put", symbol: "IEF P90", type: "ETF Option", quantity: 20, price: 2.4, multiplier: 100, marketValue: 4800, volatility: 0.2, beta: -0.12, delta: -0.25 },
 ].map((position) => ({ ...position, riskSource: "historical-pending" }));
 
 export function enrichPositionsWithHistoricalRisk(
@@ -721,8 +721,8 @@ function inferInstrumentType(symbol: string, description: string, suppliedType =
   const option = /\b(call|put|option)\b/.test(context) ||
     /[a-z]{1,6}\d{6}[cp]\d{8}$/i.test(symbol.replace(/\s/g, ""));
   if (option) {
-    if (/\b(treasury|bond|tlt|ief|shy|iei)\b/.test(context)) return "Bond Option";
     if (/\b(etf|spy|qqq|schd|tlt|ief|shy|iei)\b/.test(context)) return "ETF Option";
+    if (/\b(treasury|bond)\b/.test(context)) return "Bond Option";
     return "Stock Option";
   }
   if (/\b(treasury|treasury note|treasury bond|fixed income|bond)\b/.test(context)) return "Bond";
