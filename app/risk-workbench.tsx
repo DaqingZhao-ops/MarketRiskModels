@@ -306,6 +306,7 @@ export function RiskWorkbench() {
             marketPrice: undefined,
             marketPriceAt: undefined,
             marketPriceSource: undefined,
+            marketPriceModel: undefined,
             riskSource: position.riskSource === "provided" ? "provided" : "historical-pending",
           })));
           setPortfolioSaveStatus(`Saved default from ${new Date(savedDefault.createdAt).toLocaleString()}.`);
@@ -587,6 +588,7 @@ export function RiskWorkbench() {
           updated.marketPrice = undefined;
           updated.marketPriceAt = undefined;
           updated.marketPriceSource = undefined;
+          updated.marketPriceModel = undefined;
           updated.riskSource = "historical-pending";
         }
         if (field === "volatility" || field === "beta" || field === "delta") {
@@ -1380,9 +1382,9 @@ export function RiskWorkbench() {
                           position.marketPriceSource === "black-scholes"
                             ? "Black–Scholes fallback"
                             : position.marketPriceSource === "hull-white"
-                              ? `${rateCalibration?.model ?? "Rate model"} option`
+                              ? `Priced with ${position.marketPriceModel ?? rateCalibration?.model ?? "rate model"}`
                             : position.marketPriceSource === "treasury-curve"
-                              ? `${rateCalibration?.model ?? "Rate model"} curve`
+                              ? `Priced with ${position.marketPriceModel ?? rateCalibration?.model ?? "rate model"} curve`
                               : "Market quote"
                         }</em>
                         <small>{position.marketPriceAt
@@ -1439,7 +1441,8 @@ export function RiskWorkbench() {
           simplified option symbols assume 90 days to expiration.
           Generic Treasury rows use the selected stored interest-rate model’s initial discount curve;
           mean reversion and volatility are retained for rate scenarios and
-          fixed-income option pricing.
+          fixed-income option pricing. Rate-sensitive model prices are labeled
+          “Priced with” followed by the exact model used.
           Delta is 1.0 for cash instruments.
           Risk source identifies calculated, supplied, fallback, and sample values.
         </p>

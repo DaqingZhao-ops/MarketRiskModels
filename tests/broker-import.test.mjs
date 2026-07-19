@@ -430,3 +430,55 @@ test("prices bond options with saved G2++ two-factor dynamics", () => {
   assert.ok(option.price >= 0);
   assert.ok(option.priceVolatility > 0);
 });
+
+test("reprices an existing bond option when the selected rate model changes", () => {
+  const curve = [
+    { maturity: 0.25, yield: 0.04 },
+    { maturity: 1, yield: 0.041 },
+    { maturity: 5, yield: 0.043 },
+    { maturity: 10, yield: 0.045 },
+  ];
+  const hullWhite = fitHullWhiteCurve(curve, "2026-07-17T00:00:00Z");
+  const g2 = fitG2Curve(curve, "2026-07-17T00:00:00Z");
+  const dates = Array.from({ length: 61 }, (_, index) =>
+    new Date(Date.UTC(2025, 0, index + 1)).toISOString().slice(0, 10));
+  const prices = dates.map((_, index) => 100 + index * 0.05);
+  const history = {
+    source: "test",
+    fetchedAt: "2026-01-01",
+    mappings: { "UST10Y C0.65": "IEF", SPY: "SPY" },
+    series: [
+      { symbol: "UST10Y C0.65", sourceSymbol: "IEF", dates, adjustedClose: prices },
+      { symbol: "SPY", sourceSymbol: "SPY", dates, adjustedClose: prices },
+    ],
+  };
+  const position = {
+    id: "bond-option",
+    symbol: "UST10Y C0.65",
+    type: "Bond Option",
+    quantity: 10,
+    price: 1,
+    multiplier: 100,
+    marketValue: 1000,
+    volatility: 0.08,
+    beta: -0.1,
+    delta: 0.3,
+    riskSource: "historical",
+  };
+  const [hullWhitePosition] = enrichPositionsWithHistoricalRisk(
+    [position],
+    history,
+    new Date("2026-01-01"),
+    hullWhite,
+  );
+  const [g2Position] = enrichPositionsWithHistoricalRisk(
+    [hullWhitePosition],
+    history,
+    new Date("2026-01-01"),
+    g2,
+  );
+  assert.equal(hullWhitePosition.marketPriceModel, "Hull-White 1F");
+  assert.equal(g2Position.marketPriceModel, "G2++ 2F");
+  assert.notEqual(g2Position.marketPrice, hullWhitePosition.marketPrice);
+  assert.equal(g2Position.riskSource, "historical");
+});

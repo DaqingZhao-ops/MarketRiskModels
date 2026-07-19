@@ -2,6 +2,7 @@ import {
   hullWhiteBondOption,
   hullWhiteDiscountFactor,
   type HullWhiteCalibration,
+  type RateModelName,
 } from "./hull-white.ts";
 
 export type ModelKind = "historical" | "monteCarlo" | "parametric";
@@ -22,6 +23,7 @@ export type Position = {
   marketPrice?: number;
   marketPriceAt?: string;
   marketPriceSource?: "market" | "black-scholes" | "treasury-curve" | "hull-white";
+  marketPriceModel?: RateModelName;
   riskSource?: "provided" | "historical-pending" | "historical" | "fallback";
 };
 
@@ -140,10 +142,12 @@ export function enrichPositionsWithHistoricalRisk(
 ) {
   const benchmark = history.series.find((item) => item.symbol === "SPY");
   return positions.map((position) => {
-    if (!["historical-pending", "fallback"].includes(position.riskSource ?? "")) return position;
+    const refreshRisk = ["historical-pending", "fallback"].includes(position.riskSource ?? "");
+    const rateSensitive = ["Bond", "Bond Option"].includes(position.type);
+    if (!refreshRisk && !rateSensitive) return position;
     const series = history.series.find((item) => item.symbol === position.symbol);
     if (!series || series.adjustedClose.length < 30) {
-      return { ...position, riskSource: "fallback" as const };
+      return refreshRisk ? { ...position, riskSource: "fallback" as const } : position;
     }
     const returns = dailyReturns(series);
     const volatility = historicalDeviation(returns.map((item) => item.value)) * Math.sqrt(252);
@@ -201,11 +205,16 @@ export function enrichPositionsWithHistoricalRisk(
           : hasTreasuryModelPrice
             ? "treasury-curve"
             : undefined,
+      marketPriceModel: hullWhiteOption || hasTreasuryModelPrice
+        ? rateCalibration?.model
+        : undefined,
       marketValue: Math.abs(position.quantity * latestPrice * position.multiplier),
-      volatility: Number.isFinite(volatility) && volatility > 0 ? volatility : position.volatility,
-      beta: Number.isFinite(beta) ? beta : position.beta,
+      volatility: refreshRisk && Number.isFinite(volatility) && volatility > 0
+        ? volatility
+        : position.volatility,
+      beta: refreshRisk && Number.isFinite(beta) ? beta : position.beta,
       delta: hullWhiteOption?.delta ?? optionDelta ?? position.delta,
-      riskSource: "historical" as const,
+      riskSource: refreshRisk ? "historical" as const : position.riskSource,
     };
   });
 }
