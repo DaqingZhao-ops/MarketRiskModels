@@ -9,7 +9,12 @@ from .config import Settings
 from .models import MarketPrice
 
 SOURCE = "Yahoo Finance adjusted daily close"
-PROXIES = {"UST10Y": "TLT"}
+PROXIES = {
+    "UST2Y": "SHY",
+    "UST5Y": "IEI",
+    "UST10Y": "IEF",
+    "UST20Y": "TLT",
+}
 
 
 def source_symbol(symbol: str) -> str:
@@ -114,4 +119,3 @@ async def load_series(
     )
     session.commit()
     return read_series(session, normalized)
-

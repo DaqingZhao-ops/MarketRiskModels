@@ -4,6 +4,9 @@ export type Position = {
   id: string;
   symbol: string;
   type: string;
+  quantity: number;
+  price: number;
+  multiplier: number;
   marketValue: number;
   volatility: number;
   beta: number;
@@ -44,12 +47,33 @@ export type RiskResult = {
 };
 
 export const DEFAULT_POSITIONS: Position[] = [
-  { id: "1", symbol: "AAPL", type: "Stock", marketValue: 240000, volatility: 0.29, beta: 1.18, delta: 1 },
-  { id: "2", symbol: "SPY", type: "ETF", marketValue: 310000, volatility: 0.18, beta: 1, delta: 1 },
-  { id: "3", symbol: "VBTLX", type: "Mutual Fund", marketValue: 180000, volatility: 0.055, beta: 0.08, delta: 1 },
-  { id: "4", symbol: "UST10Y", type: "Bond", marketValue: 225000, volatility: 0.075, beta: -0.12, delta: 1 },
-  { id: "5", symbol: "AAPL C200", type: "Stock Option", marketValue: 46000, volatility: 0.46, beta: 1.25, delta: 0.62 },
-  { id: "6", symbol: "TLT P90", type: "Bond Option", marketValue: 29000, volatility: 0.34, beta: -0.18, delta: -0.41 },
+  { id: "aapl", symbol: "AAPL", type: "Stock", quantity: 100, price: 220, multiplier: 1, marketValue: 22000, volatility: 0.29, beta: 1.18, delta: 1 },
+  { id: "amzn", symbol: "AMZN", type: "Stock", quantity: 200, price: 225, multiplier: 1, marketValue: 45000, volatility: 0.32, beta: 1.2, delta: 1 },
+  { id: "goog", symbol: "GOOG", type: "Stock", quantity: 150, price: 190, multiplier: 1, marketValue: 28500, volatility: 0.28, beta: 1.05, delta: 1 },
+  { id: "meta", symbol: "META", type: "Stock", quantity: 30, price: 700, multiplier: 1, marketValue: 21000, volatility: 0.34, beta: 1.25, delta: 1 },
+  { id: "msft", symbol: "MSFT", type: "Stock", quantity: 150, price: 520, multiplier: 1, marketValue: 78000, volatility: 0.25, beta: 1.0, delta: 1 },
+  { id: "baba", symbol: "BABA", type: "Stock", quantity: 200, price: 125, multiplier: 1, marketValue: 25000, volatility: 0.4, beta: 0.65, delta: 1 },
+  { id: "nvda", symbol: "NVDA", type: "Stock", quantity: 200, price: 180, multiplier: 1, marketValue: 36000, volatility: 0.48, beta: 1.7, delta: 1 },
+  { id: "intc", symbol: "INTC", type: "Stock", quantity: 200, price: 30, multiplier: 1, marketValue: 6000, volatility: 0.42, beta: 1.1, delta: 1 },
+  { id: "cost", symbol: "COST", type: "Stock", quantity: 200, price: 1000, multiplier: 1, marketValue: 200000, volatility: 0.23, beta: 0.82, delta: 1 },
+  { id: "klac", symbol: "KLAC", type: "Stock", quantity: 200, price: 900, multiplier: 1, marketValue: 180000, volatility: 0.38, beta: 1.35, delta: 1 },
+  { id: "spy", symbol: "SPY", type: "ETF", quantity: 100, price: 650, multiplier: 1, marketValue: 65000, volatility: 0.18, beta: 1, delta: 1 },
+  { id: "schd", symbol: "SCHD", type: "ETF", quantity: 1500, price: 30, multiplier: 1, marketValue: 45000, volatility: 0.16, beta: 0.78, delta: 1 },
+  { id: "fagix", symbol: "FAGIX", type: "Mutual Fund", quantity: 2000, price: 9, multiplier: 1, marketValue: 18000, volatility: 0.09, beta: 0.28, delta: 1 },
+  { id: "aapl-call", symbol: "AAPL C250", type: "Stock Option", quantity: 10, price: 8.5, multiplier: 100, marketValue: 8500, volatility: 0.48, beta: 1.18, delta: 0.42 },
+  { id: "amzn-put", symbol: "AMZN P180", type: "Stock Option", quantity: 8, price: 6.25, multiplier: 100, marketValue: 5000, volatility: 0.52, beta: 1.2, delta: -0.28 },
+  { id: "goog-call", symbol: "GOOG C220", type: "Stock Option", quantity: 6, price: 7.5, multiplier: 100, marketValue: 4500, volatility: 0.46, beta: 1.05, delta: 0.36 },
+  { id: "meta-put", symbol: "META P600", type: "Stock Option", quantity: 4, price: 18, multiplier: 100, marketValue: 7200, volatility: 0.5, beta: 1.25, delta: -0.31 },
+  { id: "msft-call", symbol: "MSFT C600", type: "Stock Option", quantity: 5, price: 12, multiplier: 100, marketValue: 6000, volatility: 0.42, beta: 1, delta: 0.33 },
+  { id: "nvda-put", symbol: "NVDA P140", type: "Stock Option", quantity: 10, price: 7.75, multiplier: 100, marketValue: 7750, volatility: 0.62, beta: 1.7, delta: -0.26 },
+  { id: "spy-put", symbol: "SPY P600", type: "ETF Option", quantity: 10, price: 11, multiplier: 100, marketValue: 11000, volatility: 0.3, beta: 1, delta: -0.3 },
+  { id: "ust2y", symbol: "UST2Y", type: "Bond", quantity: 100000, price: 0.995, multiplier: 1, marketValue: 99500, volatility: 0.02, beta: -0.03, delta: 1 },
+  { id: "ust5y", symbol: "UST5Y", type: "Bond", quantity: 150000, price: 0.98, multiplier: 1, marketValue: 147000, volatility: 0.045, beta: -0.08, delta: 1 },
+  { id: "ust10y", symbol: "UST10Y", type: "Bond", quantity: 200000, price: 0.96, multiplier: 1, marketValue: 192000, volatility: 0.075, beta: -0.12, delta: 1 },
+  { id: "ust20y", symbol: "UST20Y", type: "Bond", quantity: 100000, price: 0.92, multiplier: 1, marketValue: 92000, volatility: 0.12, beta: -0.2, delta: 1 },
+  { id: "tlt-call", symbol: "TLT C100", type: "Bond Option", quantity: 20, price: 4.5, multiplier: 100, marketValue: 9000, volatility: 0.32, beta: -0.2, delta: 0.4 },
+  { id: "tlt-put", symbol: "TLT P80", type: "Bond Option", quantity: 25, price: 3.2, multiplier: 100, marketValue: 8000, volatility: 0.35, beta: -0.2, delta: -0.32 },
+  { id: "ief-put", symbol: "IEF P90", type: "Bond Option", quantity: 20, price: 2.4, multiplier: 100, marketValue: 4800, volatility: 0.2, beta: -0.12, delta: -0.25 },
 ];
 
 function mulberry32(seed: number) {
@@ -301,6 +325,9 @@ export function parsePositionsCsv(text: string): Position[] {
       id: `import-${index}-${record.symbol}`,
       symbol: record.symbol,
       type: record.type,
+      quantity: Number(record.quantity ?? 0),
+      price: Number(record.price ?? 0),
+      multiplier: Number(record.multiplier ?? 1),
       marketValue: Number(record.marketValue),
       volatility: Number(record.volatility),
       beta: Number(record.beta),

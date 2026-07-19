@@ -75,18 +75,23 @@ clearly identifies that it is using the TypeScript continuity engine.
 
 ## Portfolio CSV
 
-Import a CSV with these exact columns:
+The default portfolio contains the requested AAPL, AMZN, GOOG, META, MSFT,
+BABA, NVDA, INTC, COST, KLAC, SPY, SCHD, and FAGIX share quantities, plus
+representative equity options, Treasury exposures, and Treasury options.
+Prices and option premiums are illustrative inputs and can be edited.
+
+Import a CSV with these columns:
 
 ```csv
-symbol,type,marketValue,volatility,beta,delta
-AAPL,Stock,240000,0.29,1.18,1
-UST10Y,Bond,225000,0.075,-0.12,1
-AAPL C200,Stock Option,46000,0.46,1.25,0.62
+symbol,type,quantity,price,multiplier,marketValue,volatility,beta,delta
+AAPL,Stock,100,220,1,22000,0.29,1.18,1
+UST10Y,Bond,200000,0.96,1,192000,0.075,-0.12,1
+AAPL C250,Stock Option,10,8.50,100,8500,0.48,1.18,0.42
 ```
 
 Volatility is annualized and expressed as a decimal. Options use
-delta-adjusted underlying returns. Historical VaR does not use the volatility
-or beta columns.
+delta-adjusted underlying returns and a 100-share contract multiplier.
+Historical VaR does not use the volatility or beta columns.
 
 ## Validation
 

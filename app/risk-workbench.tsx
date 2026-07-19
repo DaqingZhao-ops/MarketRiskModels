@@ -141,17 +141,22 @@ export function RiskWorkbench() {
 
   function updatePosition(id: string, field: keyof Position, raw: string) {
     setPositions((current) =>
-      current.map((position) =>
-        position.id === id
-          ? {
-              ...position,
-              [field]:
-                field === "symbol" || field === "type"
-                  ? raw
-                  : Number(raw) || 0,
-            }
-          : position,
-      ),
+      current.map((position) => {
+        if (position.id !== id) return position;
+        const updated = {
+          ...position,
+          [field]:
+            field === "symbol" || field === "type"
+              ? raw
+              : Number(raw) || 0,
+        };
+        if (field === "quantity" || field === "price" || field === "multiplier") {
+          updated.marketValue = Math.abs(
+            updated.quantity * updated.price * updated.multiplier,
+          );
+        }
+        return updated;
+      }),
     );
   }
 
@@ -354,6 +359,9 @@ export function RiskWorkbench() {
                   id: crypto.randomUUID(),
                   symbol: "NEW",
                   type: "Stock",
+                  quantity: 100,
+                  price: 100,
+                  multiplier: 1,
                   marketValue: 10000,
                   volatility: 0.25,
                   beta: 1,
@@ -371,6 +379,9 @@ export function RiskWorkbench() {
               <tr>
                 <th>Symbol</th>
                 <th>Instrument</th>
+                <th>Quantity</th>
+                <th>Unit price</th>
+                <th>Multiplier</th>
                 <th>Market value</th>
                 <th>Annual vol.</th>
                 <th>Beta</th>
@@ -387,7 +398,10 @@ export function RiskWorkbench() {
                       {["Stock", "ETF", "Mutual Fund", "Bond", "Stock Option", "ETF Option", "Bond Option"].map((type) => <option key={type}>{type}</option>)}
                     </select>
                   </td>
-                  <td><input aria-label={`${position.symbol} market value`} type="number" value={position.marketValue} onChange={(e) => updatePosition(position.id, "marketValue", e.target.value)} /></td>
+                  <td><input aria-label={`${position.symbol} quantity`} type="number" value={position.quantity} onChange={(e) => updatePosition(position.id, "quantity", e.target.value)} /></td>
+                  <td><input aria-label={`${position.symbol} unit price`} type="number" min="0" step="0.01" value={position.price} onChange={(e) => updatePosition(position.id, "price", e.target.value)} /></td>
+                  <td><input aria-label={`${position.symbol} multiplier`} type="number" min="0" step="1" value={position.multiplier} onChange={(e) => updatePosition(position.id, "multiplier", e.target.value)} /></td>
+                  <td><input aria-label={`${position.symbol} market value`} type="number" value={position.marketValue} readOnly /></td>
                   <td><input aria-label={`${position.symbol} volatility`} type="number" min="0" step="0.01" value={position.volatility} onChange={(e) => updatePosition(position.id, "volatility", e.target.value)} /></td>
                   <td><input aria-label={`${position.symbol} beta`} type="number" step="0.1" value={position.beta} onChange={(e) => updatePosition(position.id, "beta", e.target.value)} /></td>
                   <td><input aria-label={`${position.symbol} delta`} type="number" step="0.05" value={position.delta} onChange={(e) => updatePosition(position.id, "delta", e.target.value)} /></td>
@@ -398,8 +412,10 @@ export function RiskWorkbench() {
           </table>
         </div>
         <p className="table-note">
-          CSV columns: symbol, type, marketValue, volatility, beta, delta.
-          Volatility uses decimals (0.25 = 25%). Delta is 1.0 for cash instruments.
+          CSV columns: symbol, type, quantity, price, multiplier, marketValue,
+          volatility, beta, delta. Market value is quantity × unit price ×
+          multiplier; option contracts use 100. Sample prices and option
+          premiums are illustrative and editable. Delta is 1.0 for cash instruments.
         </p>
       </section>
 

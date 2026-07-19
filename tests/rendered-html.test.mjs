@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 async function render() {
@@ -51,4 +52,31 @@ test("includes all supported instrument classes", async () => {
   ]) {
     assert.match(html, new RegExp(instrument));
   }
+});
+
+test("ships the requested default share quantities", async () => {
+  const csv = await readFile(
+    new URL("../public/sample-portfolio.csv", import.meta.url),
+    "utf8",
+  );
+  for (const row of [
+    "AAPL,Stock,100,",
+    "AMZN,Stock,200,",
+    "GOOG,Stock,150,",
+    "META,Stock,30,",
+    "MSFT,Stock,150,",
+    "BABA,Stock,200,",
+    "NVDA,Stock,200,",
+    "INTC,Stock,200,",
+    "COST,Stock,200,",
+    "KLAC,Stock,200,",
+    "SPY,ETF,100,",
+    "SCHD,ETF,1500,",
+    "FAGIX,Mutual Fund,2000,",
+  ]) {
+    assert.match(csv, new RegExp(`^${row}`, "m"));
+  }
+  assert.match(csv, /Stock Option/);
+  assert.match(csv, /Bond Option/);
+  assert.match(csv, /^UST10Y,Bond,/m);
 });

@@ -27,6 +27,9 @@ class Position(ApiModel):
     id: str
     symbol: str = Field(min_length=1, max_length=64)
     type: str = Field(min_length=1, max_length=64)
+    quantity: float = 0
+    price: float = 0
+    multiplier: float = 1
     market_value: float
     volatility: float = Field(ge=0)
     beta: float
@@ -73,4 +76,3 @@ class MarketSeries(ApiModel):
     source_symbol: str
     observations: list[PriceObservation]
     retrieved_at: datetime
-

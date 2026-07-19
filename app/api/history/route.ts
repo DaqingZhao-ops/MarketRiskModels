@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 
 const PROXIES: Record<string, string> = {
-  UST10Y: "TLT",
+  UST2Y: "SHY",
+  UST5Y: "IEI",
+  UST10Y: "IEF",
+  UST20Y: "TLT",
 };
 
 function sourceSymbol(symbol: string) {
