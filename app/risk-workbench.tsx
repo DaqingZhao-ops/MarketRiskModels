@@ -40,6 +40,17 @@ const riskSourceOrder: Record<NonNullable<Position["riskSource"]> | "sample", nu
   sample: 4,
 };
 
+const emptyPositionDraft = {
+  symbol: "",
+  type: "Stock",
+  quantity: "",
+  price: "",
+  multiplier: "1",
+  volatility: "",
+  beta: "",
+  delta: "",
+};
+
 const MODEL_COPY: Record<ModelKind, { label: string; note: string }> = {
   historical: {
     label: "Historical simulation",
@@ -130,6 +141,7 @@ export function RiskWorkbench() {
   const [historyStatus, setHistoryStatus] = useState("Loading market history…");
   const [remoteResult, setRemoteResult] = useState<RiskResult>();
   const [engineStatus, setEngineStatus] = useState("Connecting to Python engine…");
+  const [positionDraft, setPositionDraft] = useState(emptyPositionDraft);
 
   const symbolsKey = useMemo(
     () => [...new Set([
@@ -242,6 +254,38 @@ export function RiskWorkbench() {
         return updated;
       }),
     );
+  }
+
+  function addDraftPosition() {
+    const symbol = positionDraft.symbol.trim().toUpperCase();
+    const quantity = Number(positionDraft.quantity);
+    const price = Number(positionDraft.price);
+    const multiplier = Number(positionDraft.multiplier) || 1;
+    if (!symbol || !Number.isFinite(quantity) || quantity === 0 ||
+        !Number.isFinite(price) || price < 0) {
+      setMessage("Enter a symbol, non-zero quantity, and valid unit price before adding.");
+      return;
+    }
+    const hasRiskFactors = [positionDraft.volatility, positionDraft.beta, positionDraft.delta]
+      .every((value) => value.trim() !== "" && Number.isFinite(Number(value)));
+    setPositions((current) => [
+      ...current,
+      {
+        id: crypto.randomUUID(),
+        symbol,
+        type: positionDraft.type,
+        quantity,
+        price,
+        multiplier,
+        marketValue: Math.abs(quantity * price * multiplier),
+        volatility: hasRiskFactors ? Number(positionDraft.volatility) : 0.25,
+        beta: hasRiskFactors ? Number(positionDraft.beta) : 1,
+        delta: hasRiskFactors ? Number(positionDraft.delta) : 1,
+        riskSource: hasRiskFactors ? "provided" : "historical-pending",
+      },
+    ]);
+    setPositionDraft(emptyPositionDraft);
+    setMessage(`${symbol} added. ${hasRiskFactors ? "Provided risk factors retained." : "Calculating risk factors from history."}`);
   }
 
   async function importCsv(event: ChangeEvent<HTMLInputElement>) {
@@ -487,29 +531,7 @@ export function RiskWorkbench() {
             <p className="eyebrow">Portfolio input</p>
             <h2>Positions & sensitivities</h2>
           </div>
-          <button
-            className="secondary"
-            onClick={() =>
-              setPositions((current) => [
-                ...current,
-                {
-                  id: crypto.randomUUID(),
-                  symbol: "NEW",
-                  type: "Stock",
-                  quantity: 100,
-                  price: 100,
-                  multiplier: 1,
-                  marketValue: 10000,
-                  volatility: 0.25,
-                  beta: 1,
-                  delta: 1,
-                  riskSource: "provided",
-                },
-              ])
-            }
-          >
-            + Add position
-          </button>
+          <span className="model-pill">Enter a new position in the first row</span>
         </div>
         <div className="table-wrap">
           <table>
@@ -529,6 +551,27 @@ export function RiskWorkbench() {
               </tr>
             </thead>
             <tbody>
+              <tr className="position-draft">
+                <td><input aria-label="New position symbol" placeholder="Symbol" value={positionDraft.symbol} onChange={(event) => setPositionDraft({ ...positionDraft, symbol: event.target.value.toUpperCase() })} /></td>
+                <td>
+                  <select aria-label="New position instrument type" value={positionDraft.type} onChange={(event) => setPositionDraft({ ...positionDraft, type: event.target.value })}>
+                    {["Stock", "ETF", "Mutual Fund", "Bond", "Stock Option", "ETF Option", "Bond Option"].map((type) => <option key={type}>{type}</option>)}
+                  </select>
+                </td>
+                <td><input aria-label="New position quantity" placeholder="0" type="number" value={positionDraft.quantity} onChange={(event) => setPositionDraft({ ...positionDraft, quantity: event.target.value })} /></td>
+                <td><input aria-label="New position unit price" placeholder="0.00" type="number" min="0" step="0.01" value={positionDraft.price} onChange={(event) => setPositionDraft({ ...positionDraft, price: event.target.value })} /></td>
+                <td><input aria-label="New position multiplier" type="number" min="0" step="1" value={positionDraft.multiplier} onChange={(event) => setPositionDraft({ ...positionDraft, multiplier: event.target.value })} /></td>
+                <td><input aria-label="New position market value" type="number" readOnly value={
+                  positionDraft.quantity && positionDraft.price
+                    ? Math.abs(Number(positionDraft.quantity) * Number(positionDraft.price) * (Number(positionDraft.multiplier) || 1))
+                    : ""
+                } /></td>
+                <td><input aria-label="New position volatility" placeholder="Auto" type="number" min="0" step="0.01" value={positionDraft.volatility} onChange={(event) => setPositionDraft({ ...positionDraft, volatility: event.target.value })} /></td>
+                <td><input aria-label="New position beta" placeholder="Auto" type="number" step="0.1" value={positionDraft.beta} onChange={(event) => setPositionDraft({ ...positionDraft, beta: event.target.value })} /></td>
+                <td><input aria-label="New position delta" placeholder="Auto" type="number" step="0.05" value={positionDraft.delta} onChange={(event) => setPositionDraft({ ...positionDraft, delta: event.target.value })} /></td>
+                <td><span className="risk-source risk-source-historical-pending">Auto / provided</span></td>
+                <td><button className="add-row" onClick={addDraftPosition}>Add</button></td>
+              </tr>
               {displayedPositions.map((position) => (
                 <tr key={position.id}>
                   <td><input aria-label={`${position.symbol} symbol`} value={position.symbol} onChange={(e) => updatePosition(position.id, "symbol", e.target.value.toUpperCase())} /></td>

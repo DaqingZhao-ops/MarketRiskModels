@@ -183,6 +183,9 @@ th { padding: 11px 16px; color: var(--muted); background: #eeece4; text-align: l
 td { padding: 10px 9px; border-top: 1px solid var(--line); }
 td input, td select { width: 100%; min-width: 84px; border: 1px solid transparent; padding: 8px; background: transparent; color: var(--ink); font-size: 11px; }
 td input:focus, td select:focus { outline: none; border-color: #88a99b; background: white; }
+.position-draft td { background: #f4f1e7; border-top: 2px solid #c9c3ae; border-bottom: 2px solid #c9c3ae; }
+.position-draft input, .position-draft select { background: rgba(255,255,255,.55); border-color: #d5d0bf; }
+.add-row { min-width: 52px; border: 1px solid var(--green); padding: 8px 10px; background: var(--green); color: white; font-size: 10px; font-weight: 700; }
 .remove { width: 28px; height: 28px; border: 0; background: transparent; color: #a46858; font-size: 18px; }
 .risk-source { display: inline-block; min-width: 72px; padding: 6px 8px; border-radius: 999px; background: #ecece7; color: #59645f; text-align: center; white-space: nowrap; font: 9px var(--font-geist-mono); }
 .risk-source-historical { background: #dcece3; color: #285f48; }
