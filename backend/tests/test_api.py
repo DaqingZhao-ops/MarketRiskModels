@@ -8,6 +8,14 @@ from market_risk.models import RiskRun
 
 
 def test_parses_market_briefing_quotes_and_headlines() -> None:
+    assert [
+        ("Nikkei 225", "^N225", "index"),
+        ("FTSE 100", "^FTSE", "index"),
+        ("DAX", "^GDAXI", "index"),
+        ("Hang Seng", "^HSI", "index"),
+        ("Shanghai Composite", "000001.SS", "index"),
+    ] == desktop_api.MARKET_INDICATORS[2:7]
+
     quote = desktop_api.parse_market_indicator(
         "S&P 500",
         "^GSPC",

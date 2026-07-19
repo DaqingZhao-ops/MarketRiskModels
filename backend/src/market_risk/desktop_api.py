@@ -34,6 +34,11 @@ class PortfolioPayload(BaseModel):
 MARKET_INDICATORS = [
     ("S&P 500", "^GSPC", "index"),
     ("Dow", "^DJI", "index"),
+    ("Nikkei 225", "^N225", "index"),
+    ("FTSE 100", "^FTSE", "index"),
+    ("DAX", "^GDAXI", "index"),
+    ("Hang Seng", "^HSI", "index"),
+    ("Shanghai Composite", "000001.SS", "index"),
     ("10Y Treasury", "^TNX", "percent"),
     ("Money market proxy", "^IRX", "percent"),
     ("EUR / USD", "EURUSD=X", "fx"),

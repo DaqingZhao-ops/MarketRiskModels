@@ -788,7 +788,7 @@ export function RiskWorkbench() {
         <div className="status"><i /> {engineStatus}</div>
       </header>
 
-      <section className="market-briefing" aria-label="Live market briefing">
+      <section className="market-briefing" aria-label="Live market briefing with 30-day market trends">
         <div className="market-indicators">
           {marketBriefing?.indicators.length ? marketBriefing.indicators.map((indicator) => (
             <article key={indicator.symbol}>
