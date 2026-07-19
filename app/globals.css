@@ -119,6 +119,11 @@ h1 {
 }
 .upload input { display: none; }
 .notice { margin: 40px 4vw 0; color: var(--muted); font-size: 11px; }
+.import-status {
+  margin: 14px 4vw -26px;
+  color: #dcece6;
+  font-size: 12px;
+}
 
 .rate-model {
   margin: 18px 4vw 6px;

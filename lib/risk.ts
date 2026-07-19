@@ -751,7 +751,7 @@ export function parsePositionsCsv(text: string): Position[] {
   const headerIndex = rows.findIndex((row) => {
     const normalized = row.map(normalizeHeader);
     return normalized.includes("symbol") &&
-      normalized.some((header) => ["quantity", "shares"].includes(header));
+      normalized.some((header) => ["quantity", "qty", "shares"].includes(header));
   });
   if (headerIndex < 0) {
     throw new Error("No Schwab, Fidelity, or Market Risk Models position header was found.");
@@ -764,9 +764,9 @@ export function parsePositionsCsv(text: string): Position[] {
     const description = field(record, "description", "name", "securitydescription");
     if (!symbol || /^(cash|pending activity|total|account total|--?)$/i.test(symbol) ||
         /money market|cash & cash investments|account total/i.test(description)) return [];
-    const quantity = parseBrokerNumber(field(record, "quantity", "shares"));
+    const quantity = parseBrokerNumber(field(record, "quantity", "qty", "shares"));
     const price = parseBrokerNumber(field(record, "price", "lastprice", "currentprice", "mostrecentprice", "marketprice"));
-    const suppliedValue = parseBrokerNumber(field(record, "marketvalue", "currentvalue", "mostrecentvalue", "value"));
+    const suppliedValue = parseBrokerNumber(field(record, "marketvalue", "mktvalue", "currentvalue", "mostrecentvalue", "value"));
     if (!Number.isFinite(quantity) || quantity === 0) return [];
     const type = nativeFormat
       ? field(record, "type") || inferInstrumentType(symbol, description)

@@ -189,6 +189,7 @@ export function RiskWorkbench() {
   const [confidence, setConfidence] = useState(0.99);
   const [horizon, setHorizon] = useState(1);
   const [message, setMessage] = useState("Default portfolio loaded; calculating risk factors from history.");
+  const [importStatus, setImportStatus] = useState("");
   const [history, setHistory] = useState<HistoricalData>();
   const [historyStatus, setHistoryStatus] = useState("Loading market history…");
   const [remoteResult, setRemoteResult] = useState<RiskResult>();
@@ -539,12 +540,22 @@ export function RiskWorkbench() {
   async function importCsv(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) return;
+    setImportStatus(`Reading ${file.name}…`);
     try {
       const parsed = parsePositionsCsv(await file.text());
+      setImportStatus(`Imported ${parsed.length} positions. Saving as the new default…`);
+      const savedDefault = await saveDefault(parsed, positions);
       setPositions(parsed);
-      setMessage(`${parsed.length} positions imported from ${file.name}. Broker files use estimated risk sensitivities.`);
+      setPortfolioSaveStatus(
+        `Imported default saved ${savedDefault ? new Date(savedDefault.createdAt).toLocaleString() : ""}.`,
+      );
+      const confirmation = `${parsed.length} positions imported from ${file.name}. Missing risk factors will be calculated from history.`;
+      setImportStatus(confirmation);
+      setMessage(confirmation);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Unable to import CSV.");
+      const failure = error instanceof Error ? error.message : "Unable to import CSV.";
+      setImportStatus(`Import failed: ${failure}`);
+      setMessage(failure);
     }
     event.target.value = "";
   }
@@ -627,6 +638,7 @@ export function RiskWorkbench() {
         </label>
       </section>
 
+      {importStatus ? <p className="import-status" role="status">{importStatus}</p> : null}
       <p className="notice" role="status">
         {model === "historical"
           ? remoteResult

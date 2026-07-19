@@ -49,6 +49,26 @@ Account Total,,,,"$143,500.00",
   assert.equal(positions[1].marketValue, 98500);
 });
 
+test("imports a Schwab export that uses Qty and Mkt Value headers", () => {
+  const csv = `Positions for account XXXX-1234 as of 07/19/2026
+
+Symbol,Description,Qty,Price,Price Change,Mkt Value,Security Type
+AAPL,APPLE INC,100,$220.00,+$1.25,"$22,000.00",Equity
+SPY  260918P00600000,SPY 09/18/2026 600.00 P,2,$8.50,-$0.20,"$1,700.00",Option
+Account Total,,,,,"$23,700.00",
+`;
+  const positions = parsePositionsCsv(csv);
+  assert.equal(positions.length, 2);
+  assert.deepEqual(
+    positions.map(({ symbol, quantity, marketValue, type }) =>
+      ({ symbol, quantity, marketValue, type })),
+    [
+      { symbol: "AAPL", quantity: 100, marketValue: 22000, type: "Stock" },
+      { symbol: "SPY  260918P00600000", quantity: 2, marketValue: 1700, type: "ETF Option" },
+    ],
+  );
+});
+
 test("continues to import the native app format", () => {
   const csv = `symbol,type,quantity,price,multiplier,marketValue,volatility,beta,delta
 AAPL,Stock,100,220,1,22000,0.29,1.18,1`;
