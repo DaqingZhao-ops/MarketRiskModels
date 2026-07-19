@@ -162,6 +162,18 @@ h2 { margin: 0; font-size: 25px; letter-spacing: -.035em; }
 .histogram > i.tail { background: var(--coral); opacity: .85; }
 .histogram > b { position: absolute; bottom: 0; top: 0; border-left: 1px dashed var(--coral); }
 .histogram > b span { position: absolute; top: -4px; left: 5px; color: var(--coral); font: 600 9px var(--font-geist-mono); }
+.plot-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 9px 18px; color: var(--muted); font: 8px var(--font-geist-mono); }
+.plot-legend span { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.legend-swatch { width: 13px; height: 7px; background: #8bab9f; opacity: .78; }
+.legend-tail { background: var(--coral); }
+.legend-line { width: 16px; height: 0; border-top: 2px solid var(--green); }
+.legend-var { border-top: 1px dashed var(--coral); }
+.legend-dot { width: 8px; height: 8px; border-radius: 50%; background: #8bab9f; }
+.legend-cloud { opacity: .45; }
+.legend-current { background: var(--coral); }
+.legend-alternative-1 { background: #2f7660; }
+.legend-alternative-2 { background: #9a7651; }
+.loss-legend { margin: 10px 28px 0; }
 .axis { margin: 8px 28px 22px; display: flex; justify-content: space-between; color: var(--muted); font: 9px var(--font-geist-mono); }
 .callout { margin: 0 27px 27px; padding: 18px; background: #eeece4; display: grid; grid-template-columns: 110px 1fr; gap: 20px; }
 .callout strong { font-size: 11px; }
@@ -190,6 +202,7 @@ h2 { margin: 0; font-size: 25px; letter-spacing: -.035em; }
 .frontier-alternative-2 { fill: #9a7651; }
 .frontier-chart .frontier-alternative-label { fill: var(--ink); font-weight: 700; }
 .frontier-chart .frontier-axis-label { fill: var(--ink); }
+.frontier-legend { margin: 2px 27px 14px; justify-content: center; }
 .frontier-summary { display: flex; flex-wrap: wrap; gap: 10px 28px; margin: 0 27px; padding: 16px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); color: var(--muted); font-size: 11px; }
 .frontier-summary b { margin-right: 5px; color: var(--ink); font-size: 14px; }
 .frontier-candidates { display: grid; grid-template-columns: minmax(180px, .55fr) 1.45fr; gap: 28px; margin: 0 27px; padding: 22px 0 8px; }

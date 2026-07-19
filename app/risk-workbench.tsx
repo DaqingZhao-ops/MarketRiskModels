@@ -716,6 +716,11 @@ export function RiskWorkbench() {
               <span>VaR</span>
             </b>
           </div>
+          <div className="plot-legend loss-legend" aria-label="Loss distribution legend">
+            <span><i className="legend-swatch legend-observation" />Observations</span>
+            <span><i className="legend-swatch legend-tail" />Tail observations</span>
+            <span><i className="legend-line legend-var" />Value at Risk</span>
+          </div>
           <div className="axis">
             <span>{money.format(-result.range)}</span>
             <span>$0</span>
@@ -766,6 +771,13 @@ export function RiskWorkbench() {
         {frontier ? (
           <>
             <EfficientFrontierChart data={frontier} />
+            <div className="plot-legend frontier-legend" aria-label="Efficient frontier legend">
+              <span><i className="legend-dot legend-cloud" />Opportunity set</span>
+              <span><i className="legend-line legend-frontier" />Efficient frontier</span>
+              <span><i className="legend-dot legend-current" />Current portfolio</span>
+              <span><i className="legend-dot legend-alternative-1" />Alternative 1</span>
+              <span><i className="legend-dot legend-alternative-2" />Alternative 2</span>
+            </div>
             <div className="frontier-summary">
               <span><b>{percent.format(frontier.current.return)}</b> expected return</span>
               <span><b>{percent.format(frontier.current.risk)}</b> volatility</span>
