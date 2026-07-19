@@ -65,20 +65,23 @@ type PortfolioVersion = {
   positions: Position[];
 };
 
+type MarketIndicatorQuote = {
+  label: string;
+  symbol: string;
+  value: number;
+  change: number;
+  percentChange: number;
+  unit: "index" | "percent" | "fx" | "gold" | "oil";
+  marketState: string;
+  asOf: string;
+  trend: number[];
+  future?: MarketIndicatorQuote;
+};
+
 type MarketBriefing = {
   source: string;
   fetchedAt: string;
-  indicators: Array<{
-    label: string;
-    symbol: string;
-    value: number;
-    change: number;
-    percentChange: number;
-    unit: "index" | "percent" | "fx" | "gold" | "oil";
-    marketState: string;
-    asOf: string;
-    trend: number[];
-  }>;
+  indicators: MarketIndicatorQuote[];
   headlines: Array<{ title: string; url: string; publishedAt: string }>;
   warnings: string[];
   disclosures: string[];
@@ -813,7 +816,37 @@ export function RiskWorkbench() {
                   ? `${indicator.change.toFixed(3)} pts`
                   : `${indicator.change.toFixed(2)} (${percent.format(indicator.percentChange)})`}
               </small>
-              <em>{indicator.marketState.toLowerCase()} · {new Date(indicator.asOf).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</em>
+              <em>
+                {indicator.marketState.toLowerCase()} · as of{" "}
+                {new Date(indicator.asOf).toLocaleString([], {
+                  year: "numeric",
+                  month: "short",
+                  day: "numeric",
+                  hour: "numeric",
+                  minute: "2-digit",
+                  timeZoneName: "short",
+                })}
+              </em>
+              {indicator.future ? (
+                <div className="market-future">
+                  <b>Futures</b>
+                  <span>{indicator.future.value.toLocaleString("en-US", { maximumFractionDigits: 2 })}</span>
+                  <small className={indicator.future.change >= 0 ? "market-up" : "market-down"}>
+                    {indicator.future.change >= 0 ? "+" : ""}
+                    {indicator.future.change.toFixed(2)} ({percent.format(indicator.future.percentChange)})
+                  </small>
+                  <time dateTime={indicator.future.asOf}>
+                    as of {new Date(indicator.future.asOf).toLocaleString([], {
+                      year: "numeric",
+                      month: "short",
+                      day: "numeric",
+                      hour: "numeric",
+                      minute: "2-digit",
+                      timeZoneName: "short",
+                    })}
+                  </time>
+                </div>
+              ) : null}
             </article>
           )) : (
             <p className="market-loading">{marketBriefingError || "Loading live market indicators…"}</p>

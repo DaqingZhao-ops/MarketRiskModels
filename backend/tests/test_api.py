@@ -15,6 +15,11 @@ def test_parses_market_briefing_quotes_and_headlines() -> None:
         ("Hang Seng", "^HSI", "index"),
         ("Shanghai Composite", "000001.SS", "index"),
     ] == desktop_api.MARKET_INDICATORS[2:7]
+    assert desktop_api.INDEX_FUTURES == {
+        "^GSPC": ("S&P 500 Futures", "ES=F"),
+        "^DJI": ("Dow Futures", "YM=F"),
+        "^N225": ("Nikkei 225 Futures", "NKD=F"),
+    }
 
     quote = desktop_api.parse_market_indicator(
         "S&P 500",

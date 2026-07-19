@@ -48,6 +48,12 @@ MARKET_INDICATORS = [
     ("WTI crude oil", "CL=F", "oil"),
 ]
 
+INDEX_FUTURES = {
+    "^GSPC": ("S&P 500 Futures", "ES=F"),
+    "^DJI": ("Dow Futures", "YM=F"),
+    "^N225": ("Nikkei 225 Futures", "NKD=F"),
+}
+
 
 def parse_market_indicator(
     label: str,
@@ -107,10 +113,22 @@ async def market_briefing() -> dict[str, Any]:
                 warnings.append(f"{label} unavailable: {error}")
                 return None
 
-        indicators = await asyncio.gather(*(
-            fetch_indicator(label, symbol, unit)
-            for label, symbol, unit in MARKET_INDICATORS
-        ))
+        quotes = await asyncio.gather(
+            *(fetch_indicator(label, symbol, unit)
+              for label, symbol, unit in MARKET_INDICATORS),
+            *(fetch_indicator(label, symbol, "index")
+              for label, symbol in INDEX_FUTURES.values()),
+        )
+        indicators = quotes[:len(MARKET_INDICATORS)]
+        futures = quotes[len(MARKET_INDICATORS):]
+        future_quotes = {
+            cash_symbol: future
+            for cash_symbol, future in zip(INDEX_FUTURES, futures, strict=True)
+            if future
+        }
+        for indicator in indicators:
+            if indicator and indicator["symbol"] in future_quotes:
+                indicator["future"] = future_quotes[indicator["symbol"]]
         try:
             news_response = await client.get("https://finance.yahoo.com/news/rssindex")
             news_response.raise_for_status()
