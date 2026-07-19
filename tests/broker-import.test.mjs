@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   calculateEfficientFrontier,
+  calculatePortfolioAlphaBeta,
   calculateRisk,
   enrichPositionsWithHistoricalRisk,
   parsePositionsCsv,
@@ -375,6 +376,41 @@ test("same symbol held in multiple accounts aggregates as one market risk factor
     "parametric", 0.99, 1,
   );
   assert.ok(Math.abs(split.dailyVolatility - combined.dailyVolatility) < 1e-10);
+});
+
+test("calculates portfolio alpha and beta against synchronized SPY returns", () => {
+  const dates = Array.from({ length: 61 }, (_, index) =>
+    new Date(Date.UTC(2025, 0, index + 1)).toISOString().slice(0, 10));
+  const spy = dates.map((_, index) => 100 * Math.exp(index * 0.001 + Math.sin(index) * 0.004));
+  const asset = [100];
+  for (let index = 1; index < dates.length; index += 1) {
+    const marketReturn = spy[index] / spy[index - 1] - 1;
+    asset.push(asset.at(-1) * (1 + 0.0002 + 1.5 * marketReturn));
+  }
+  const stats = calculatePortfolioAlphaBeta([{
+    id: "asset",
+    symbol: "AAA",
+    type: "Stock",
+    quantity: 10,
+    price: 100,
+    multiplier: 1,
+    marketValue: 1000,
+    volatility: 0.2,
+    beta: 1.5,
+    delta: 1,
+  }], {
+    source: "test",
+    fetchedAt: "2026-01-01",
+    mappings: { AAA: "AAA", SPY: "SPY" },
+    series: [
+      { symbol: "AAA", sourceSymbol: "AAA", dates, adjustedClose: asset },
+      { symbol: "SPY", sourceSymbol: "SPY", dates, adjustedClose: spy },
+    ],
+  });
+  assert.ok(stats);
+  assert.ok(Math.abs(stats.beta - 1.5) < 1e-10);
+  assert.ok(Math.abs(stats.alpha - 0.0002 * 252) < 1e-10);
+  assert.equal(stats.observations, 60);
 });
 
 test("retries fallback risk factors when history later becomes available", () => {

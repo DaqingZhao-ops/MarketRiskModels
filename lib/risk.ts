@@ -283,6 +283,56 @@ function historicalBeta(asset: HistoricalSeries, benchmark: HistoricalSeries) {
   return variance > 0 ? covariance / variance : Number.NaN;
 }
 
+export function calculatePortfolioAlphaBeta(
+  positions: Position[],
+  history?: HistoricalData,
+) {
+  if (!history) return undefined;
+  const benchmark = history.series.find((item) => item.symbol === "SPY");
+  if (!benchmark) return undefined;
+  const grossMarketValue = positions.reduce(
+    (sum, position) => sum + Math.abs(position.marketValue),
+    0,
+  );
+  if (grossMarketValue <= 0) return undefined;
+  const assets = positions.flatMap((position) => {
+    const series = history.series.find((item) => item.symbol === position.symbol);
+    if (!series) return [];
+    return [{
+      weight: position.marketValue * position.delta * Math.sign(position.quantity || 1) /
+        grossMarketValue,
+      returns: new Map(dailyReturns(series).map((item) => [item.date, item.value])),
+    }];
+  });
+  if (!assets.length) return undefined;
+  const pairs = dailyReturns(benchmark).flatMap((marketObservation) => {
+    if (!assets.every((asset) => asset.returns.has(marketObservation.date))) return [];
+    const portfolioReturn = assets.reduce(
+      (sum, asset) => sum + asset.weight * (asset.returns.get(marketObservation.date) ?? 0),
+      0,
+    );
+    return [[portfolioReturn, marketObservation.value] as const];
+  });
+  if (pairs.length < 30) return undefined;
+  const portfolioMean = pairs.reduce((sum, pair) => sum + pair[0], 0) / pairs.length;
+  const marketMean = pairs.reduce((sum, pair) => sum + pair[1], 0) / pairs.length;
+  const covariance = pairs.reduce(
+    (sum, pair) => sum + (pair[0] - portfolioMean) * (pair[1] - marketMean),
+    0,
+  ) / (pairs.length - 1);
+  const marketVariance = pairs.reduce(
+    (sum, pair) => sum + (pair[1] - marketMean) ** 2,
+    0,
+  ) / (pairs.length - 1);
+  if (marketVariance <= 0) return undefined;
+  const beta = covariance / marketVariance;
+  return {
+    alpha: (portfolioMean - beta * marketMean) * 252,
+    beta,
+    observations: pairs.length,
+  };
+}
+
 function optionTerms(symbol: string, asOf: Date) {
   const compact = symbol.replace(/^[+-]/, "").replace(/\s/g, "");
   const occ = compact.match(/^[A-Z]{1,6}(\d{6})([CP])(\d{8})$/i);

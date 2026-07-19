@@ -39,6 +39,8 @@ test("server-renders the market risk workbench", async () => {
   assert.match(html, /Loading live market indicators/);
   assert.match(html, /30-day market trends/);
   assert.match(html, /Expected shortfall/);
+  assert.match(html, /Historical alpha/);
+  assert.match(html, /Portfolio beta/);
   assert.match(html, /Loss distribution legend/);
   assert.match(html, /Tail observations/);
   assert.match(html, /Efficient frontier/);

@@ -123,6 +123,9 @@ h1 {
 .hero-aside { min-width: 280px; padding: 26px; border-left: 3px solid var(--coral); background: #ece9de; display: grid; gap: 7px; }
 .hero-aside span, .hero-aside small { color: var(--muted); font-size: 11px; }
 .hero-aside strong { font-size: 31px; letter-spacing: -.04em; }
+.portfolio-market-stats { margin: 5px 0; padding: 10px 0; border-top: 1px solid #d2cdc0; border-bottom: 1px solid #d2cdc0; display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.portfolio-market-stats div { display: grid; gap: 3px; }
+.portfolio-market-stats b { color: var(--green); font-size: 17px; }
 
 .controls {
   margin: 0 4vw;

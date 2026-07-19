@@ -10,6 +10,7 @@ import {
   EfficientFrontierResult,
   calculateRisk,
   calculateEfficientFrontier,
+  calculatePortfolioAlphaBeta,
   enrichPositionsWithHistoricalRisk,
   parsePositionsCsv,
 } from "../lib/risk";
@@ -487,6 +488,10 @@ export function RiskWorkbench() {
     () => calculateEfficientFrontier(positions, history),
     [positions, history],
   );
+  const portfolioAlphaBeta = useMemo(
+    () => calculatePortfolioAlphaBeta(positions, history),
+    [positions, history],
+  );
   const displayedPositions = useMemo(
     () => {
       if (positionSort) {
@@ -898,6 +903,16 @@ export function RiskWorkbench() {
         <div className="hero-aside">
           <span>Portfolio market value</span>
           <strong>{money.format(result.marketValue)}</strong>
+          <div className="portfolio-market-stats">
+            <div title="Annualized regression intercept of portfolio returns against SPY">
+              <span>Historical alpha</span>
+              <b>{portfolioAlphaBeta ? percent.format(portfolioAlphaBeta.alpha) : "Loading…"}</b>
+            </div>
+            <div title="Historical portfolio return sensitivity to SPY">
+              <span>Portfolio beta</span>
+              <b>{portfolioAlphaBeta ? portfolioAlphaBeta.beta.toFixed(2) : "Loading…"}</b>
+            </div>
+          </div>
           <small>{positions.length} positions · {result.observations.toLocaleString()} scenarios</small>
         </div>
       </section>
