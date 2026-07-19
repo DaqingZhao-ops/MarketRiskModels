@@ -8,6 +8,8 @@ export type ModelKind = "historical" | "monteCarlo" | "parametric";
 
 export type Position = {
   id: string;
+  account?: string;
+  sourceFile?: string;
   symbol: string;
   type: string;
   quantity: number;
@@ -124,7 +126,11 @@ export const DEFAULT_POSITIONS: Position[] = [
   { id: "tlt-call", symbol: "TLT C100", type: "ETF Option", quantity: 20, price: 4.5, multiplier: 100, marketValue: 9000, volatility: 0.32, beta: -0.2, delta: 0.4 },
   { id: "tlt-put", symbol: "TLT P80", type: "ETF Option", quantity: 25, price: 3.2, multiplier: 100, marketValue: 8000, volatility: 0.35, beta: -0.2, delta: -0.32 },
   { id: "ief-put", symbol: "IEF P90", type: "ETF Option", quantity: 20, price: 2.4, multiplier: 100, marketValue: 4800, volatility: 0.2, beta: -0.12, delta: -0.25 },
-].map((position) => ({ ...position, riskSource: "historical-pending" }));
+].map((position) => ({
+  ...position,
+  account: "Built-in sample",
+  riskSource: "historical-pending" as const,
+}));
 
 export function enrichPositionsWithHistoricalRisk(
   positions: Position[],
@@ -555,7 +561,7 @@ function inverseNormal(probability: number) {
 }
 
 function correlation(left: Position, right: Position) {
-  if (left.id === right.id) return 1;
+  if (left.id === right.id || left.symbol === right.symbol) return 1;
   const systematic = left.beta * right.beta * 0.38;
   const sameClass = left.type.replace(" Option", "") === right.type.replace(" Option", "") ? 0.18 : 0;
   return Math.max(-0.65, Math.min(0.82, systematic + sameClass));
@@ -746,7 +752,7 @@ export function calculateRisk(
   };
 }
 
-export function parsePositionsCsv(text: string): Position[] {
+export function parsePositionsCsv(text: string, defaultAccount = "Imported account"): Position[] {
   const rows = parseCsvRows(text);
   const headerIndex = rows.findIndex((row) => {
     const normalized = row.map(normalizeHeader);
@@ -790,6 +796,7 @@ export function parsePositionsCsv(text: string): Position[] {
       : Math.abs(quantity * price * multiplier);
     const position: Position = {
       id: `import-${index}-${symbol}`,
+      account: field(record, "accountname", "account", "accountnumber") || defaultAccount,
       symbol,
       type,
       quantity,

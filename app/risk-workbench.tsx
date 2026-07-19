@@ -67,6 +67,7 @@ type PortfolioVersion = {
 };
 
 type SortField =
+  | "account"
   | "symbol"
   | "type"
   | "quantity"
@@ -195,6 +196,7 @@ export function RiskWorkbench() {
   const [message, setMessage] = useState("Default portfolio loaded; calculating risk factors from history.");
   const [importStatus, setImportStatus] = useState("");
   const [selectedImportFile, setSelectedImportFile] = useState<File>();
+  const [importMode, setImportMode] = useState<"append" | "replace">("append");
   const [importInputKey, setImportInputKey] = useState(0);
   const [history, setHistory] = useState<HistoricalData>();
   const [historyStatus, setHistoryStatus] = useState("Loading market history…");
@@ -452,7 +454,7 @@ export function RiskWorkbench() {
         const updated = {
           ...position,
           [field]:
-            field === "symbol" || field === "type"
+            field === "symbol" || field === "type" || field === "account"
               ? raw
               : Number(raw) || 0,
         };
@@ -509,6 +511,7 @@ export function RiskWorkbench() {
       ...positions,
       {
         id: crypto.randomUUID(),
+        account: "Manual entries",
         symbol,
         type: positionDraft.type,
         quantity,
@@ -600,7 +603,12 @@ export function RiskWorkbench() {
     setImportStatus(`Reading ${file.name}…`);
     let parsed: Position[];
     try {
-      parsed = parsePositionsCsv(await file.text());
+      const accountName = file.name.replace(/\.csv$/i, "");
+      parsed = parsePositionsCsv(await file.text(), accountName).map((position) => ({
+        ...position,
+        id: crypto.randomUUID(),
+        sourceFile: file.name,
+      }));
     } catch (error) {
       const failure = error instanceof Error ? error.message : "Unable to import CSV.";
       setImportStatus(`Import failed: ${failure}`);
@@ -608,17 +616,23 @@ export function RiskWorkbench() {
       return;
     }
 
-    setPositions(parsed);
+    const nextPositions = importMode === "append" ? [...positions, ...parsed] : parsed;
+    setPositions(nextPositions);
     setManualPositionOrder(false);
     setPositionSort(undefined);
-    setImportStatus(`Imported ${parsed.length} positions. Saving as the new default…`);
+    setImportStatus(`${importMode === "append" ? "Appending" : "Imported"} ${parsed.length} positions. Saving the aggregate as the new default…`);
     try {
-      const savedDefault = await saveDefault(parsed, positions, file.name);
+      const savedDefault = await saveDefault(
+        nextPositions,
+        positions,
+        importMode === "append" ? `Aggregate + ${file.name}` : file.name,
+      );
       if (savedDefault) setSelectedVersionId(savedDefault.id);
       setPortfolioSaveStatus(
         `Imported default saved ${savedDefault ? new Date(savedDefault.createdAt).toLocaleString() : ""}.`,
       );
-      const confirmation = `${parsed.length} positions imported from ${file.name}. Missing risk factors will be calculated from history.`;
+      const accountCount = new Set(nextPositions.map((position) => position.account ?? "Unassigned")).size;
+      const confirmation = `${parsed.length} positions ${importMode === "append" ? "appended" : "imported"} from ${file.name}; ${nextPositions.length} positions across ${accountCount} accounts are now analyzed in aggregate. Missing risk factors will be calculated from history.`;
       setImportStatus(confirmation);
       setMessage(confirmation);
     } catch (error) {
@@ -706,6 +720,14 @@ export function RiskWorkbench() {
         </div>
         <div className="import-control">
           <label htmlFor="position-file">Position source CSV</label>
+          <select
+            aria-label="Portfolio import mode"
+            value={importMode}
+            onChange={(event) => setImportMode(event.target.value as "append" | "replace")}
+          >
+            <option value="append">Append as another account</option>
+            <option value="replace">Replace aggregate portfolio</option>
+          </select>
           <input
             key={importInputKey}
             id="position-file"
@@ -714,7 +736,9 @@ export function RiskWorkbench() {
             onChange={selectImportFile}
           />
           <button type="button" onClick={importCsv}>
-            {selectedImportFile ? "Retry selected file" : "Import selected file"}
+            {selectedImportFile
+              ? `${importMode === "append" ? "Append" : "Replace with"} selected file`
+              : "Import selected file"}
           </button>
         </div>
       </section>
@@ -1023,6 +1047,7 @@ export function RiskWorkbench() {
             <thead>
               <tr>
                 <th className="move-column" aria-label="Move position" />
+                <th aria-sort={positionSort?.field === "account" ? `${positionSort.direction}ending` : "none"}>{sortLabel("Account", "account")}</th>
                 <th aria-sort={positionSort?.field === "symbol" ? `${positionSort.direction}ending` : "none"}>{sortLabel("Symbol", "symbol")}</th>
                 <th aria-sort={positionSort?.field === "type" ? `${positionSort.direction}ending` : "none"}>{sortLabel("Instrument", "type")}</th>
                 <th aria-sort={positionSort?.field === "quantity" ? `${positionSort.direction}ending` : "none"}>{sortLabel("Quantity", "quantity")}</th>
@@ -1040,6 +1065,7 @@ export function RiskWorkbench() {
             <tbody>
               <tr className="position-draft">
                 <td className="move-column" />
+                <td>Manual entries</td>
                 <td><input aria-label="New position symbol" placeholder="Symbol" value={positionDraft.symbol} onChange={(event) => setPositionDraft({ ...positionDraft, symbol: event.target.value.toUpperCase() })} /></td>
                 <td>
                   <select aria-label="New position instrument type" value={positionDraft.type} onChange={(event) => setPositionDraft({ ...positionDraft, type: event.target.value })}>
@@ -1091,6 +1117,7 @@ export function RiskWorkbench() {
                       ⠿
                     </button>
                   </td>
+                  <td><input aria-label={`${position.symbol} account`} value={position.account ?? "Unassigned"} onChange={(e) => updatePosition(position.id, "account", e.target.value)} /></td>
                   <td><input aria-label={`${position.symbol} symbol`} value={position.symbol} onChange={(e) => updatePosition(position.id, "symbol", e.target.value.toUpperCase())} /></td>
                   <td>
                     <select aria-label={`${position.symbol} instrument type`} value={position.type} onChange={(e) => updatePosition(position.id, "type", e.target.value)}>

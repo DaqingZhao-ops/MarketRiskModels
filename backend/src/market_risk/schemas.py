@@ -37,7 +37,7 @@ class Position(ApiModel):
 
 
 class RiskRequest(ApiModel):
-    positions: list[Position] = Field(min_length=1, max_length=200)
+    positions: list[Position] = Field(min_length=1, max_length=1000)
     model: ModelKind
     confidence: float = Field(gt=0.5, lt=1)
     horizon: int = Field(default=1)

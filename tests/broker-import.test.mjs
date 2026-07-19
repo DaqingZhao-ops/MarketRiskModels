@@ -31,6 +31,7 @@ Z12345678,Brokerage,SPAXX,"FIDELITY GOVERNMENT MONEY MARKET",5000,$1.00,"$5,000.
       { symbol: "-AAPL260116P00200000", quantity: 2, price: 5.5, marketValue: 1100, type: "Stock Option", multiplier: 100 },
     ],
   );
+  assert.equal(positions[0].account, "Brokerage");
   assert.equal(positions[1].delta, -0.35);
 });
 
@@ -42,8 +43,9 @@ SCHD,SCHWAB US DIVIDEND EQUITY ETF,1500,$30.00,"$45,000.00",ETF
 91282CJL6,"US TREASURY NOTE, 4.25%, 06/30/2031",100000,$98.50,"$98,500.00",Fixed Income
 Account Total,,,,"$143,500.00",
 `;
-  const positions = parsePositionsCsv(csv);
+  const positions = parsePositionsCsv(csv, "Schwab Individual");
   assert.equal(positions.length, 2);
+  assert.equal(positions[0].account, "Schwab Individual");
   assert.equal(positions[0].type, "ETF");
   assert.equal(positions[1].type, "Bond");
   assert.equal(positions[1].quantity, 100000);
@@ -315,6 +317,30 @@ test("negative quantities reverse directional risk exposure", () => {
   const hedged = calculateRisk([long, hedge], "parametric", 0.99, 1);
   assert.ok(unhedged.dailyVolatility > 0);
   assert.ok(hedged.dailyVolatility < unhedged.dailyVolatility);
+});
+
+test("same symbol held in multiple accounts aggregates as one market risk factor", () => {
+  const shared = {
+    symbol: "AAPL",
+    type: "Stock",
+    price: 100,
+    multiplier: 1,
+    volatility: 0.2,
+    beta: 1,
+    delta: 1,
+  };
+  const combined = calculateRisk(
+    [{ ...shared, id: "combined", quantity: 20, marketValue: 2000 }],
+    "parametric", 0.99, 1,
+  );
+  const split = calculateRisk(
+    [
+      { ...shared, id: "account-a", account: "A", quantity: 10, marketValue: 1000 },
+      { ...shared, id: "account-b", account: "B", quantity: 10, marketValue: 1000 },
+    ],
+    "parametric", 0.99, 1,
+  );
+  assert.ok(Math.abs(split.dailyVolatility - combined.dailyVolatility) < 1e-10);
 });
 
 test("retries fallback risk factors when history later becomes available", () => {

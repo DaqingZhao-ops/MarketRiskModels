@@ -16,7 +16,7 @@ def _directional_exposure(position: Position) -> float:
 
 
 def _correlation(left: Position, right: Position) -> float:
-    if left.id == right.id:
+    if left.id == right.id or left.symbol == right.symbol:
         return 1.0
     systematic = left.beta * right.beta * 0.38
     same_class = 0.18 if left.type.replace(" Option", "") == right.type.replace(" Option", "") else 0
