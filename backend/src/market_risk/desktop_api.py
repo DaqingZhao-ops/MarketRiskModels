@@ -128,6 +128,10 @@ async def market_history(
 
 
 RATE_MODELS = {"Hull-White 1F", "G2++ 2F"}
+HW_BOUNDS = {
+    "meanReversion": [0.01, 1.50],
+    "volatility": [0.001, 0.10],
+}
 G2_BOUNDS = {
     "meanReversion": [0.01, 1.50],
     "volatility": [0.001, 0.10],
@@ -139,6 +143,54 @@ G2_BOUNDS = {
 
 def _bounded(value: float, bounds: list[float]) -> float:
     return max(bounds[0], min(bounds[1], value))
+
+
+def _fit_mean_reverting_factor(
+    values: np.ndarray,
+    bounds: list[float],
+) -> tuple[float, np.ndarray]:
+    centered = values - values.mean()
+    lagged = centered[:-1]
+    current = centered[1:]
+    denominator = float(lagged @ lagged)
+    phi = float(lagged @ current / denominator) if denominator > 1e-14 else 0.99
+    phi = max(0.001, min(0.99996, phi))
+    mean_reversion = _bounded(-math.log(phi) * 252, bounds)
+    innovations = current - math.exp(-mean_reversion / 252) * lagged
+    return mean_reversion, innovations
+
+
+def estimate_hull_white_parameters(
+    observations: list[tuple[str, list[float]]],
+) -> dict[str, Any]:
+    if len(observations) < 60:
+        raise ValueError("At least 60 daily Treasury curves are required for Hull-White calibration.")
+    matrix = np.asarray([values for _, values in observations], dtype=float) / 100
+    if matrix.ndim != 2 or matrix.shape[1] < 4 or not np.isfinite(matrix).all():
+        raise ValueError("Treasury history contains invalid curve observations.")
+    level = matrix.mean(axis=1)
+    mean_reversion, innovations = _fit_mean_reverting_factor(
+        level,
+        HW_BOUNDS["meanReversion"],
+    )
+    volatility = _bounded(
+        float(np.std(innovations, ddof=1) * np.sqrt(252)),
+        HW_BOUNDS["volatility"],
+    )
+    fitted_level = np.repeat(level[:, None], matrix.shape[1], axis=1)
+    rmse_basis_points = float(np.sqrt(np.mean((matrix - fitted_level) ** 2)) * 10_000)
+    return {
+        "meanReversion": mean_reversion,
+        "volatility": volatility,
+        "fitRmse": rmse_basis_points,
+        "observationCount": len(observations),
+        "calibrationWindowStart": observations[0][0],
+        "calibrationWindowEnd": observations[-1][0],
+        "calibrationSource": "U.S. Treasury daily par-yield curve history",
+        "calibrationObjective": "One-factor AR(1) proxy on curve level",
+        "parameterBounds": HW_BOUNDS,
+        "fallbackUsed": False,
+    }
 
 
 def estimate_g2_parameters(
@@ -153,23 +205,12 @@ def estimate_g2_parameters(
     level = matrix.mean(axis=1)
     slope = matrix[:, -2:].mean(axis=1) - matrix[:, 3:5].mean(axis=1)
     factors = np.column_stack([level, slope])
-    factors -= factors.mean(axis=0)
 
-    def fit_factor(values: np.ndarray, bounds: list[float]) -> tuple[float, np.ndarray]:
-        lagged = values[:-1]
-        current = values[1:]
-        denominator = float(lagged @ lagged)
-        phi = float(lagged @ current / denominator) if denominator > 1e-14 else 0.99
-        phi = max(0.001, min(0.99996, phi))
-        mean_reversion = _bounded(-math.log(phi) * 252, bounds)
-        innovations = current - math.exp(-mean_reversion / 252) * lagged
-        return mean_reversion, innovations
-
-    first_mean_reversion, first_innovations = fit_factor(
+    first_mean_reversion, first_innovations = _fit_mean_reverting_factor(
         factors[:, 0],
         G2_BOUNDS["meanReversion"],
     )
-    second_mean_reversion, second_innovations = fit_factor(
+    second_mean_reversion, second_innovations = _fit_mean_reverting_factor(
         factors[:, 1],
         G2_BOUNDS["secondFactorMeanReversion"],
     )
@@ -292,11 +333,15 @@ async def treasury_calibration(model: str) -> dict[str, Any]:
         "fitRmse": 0,
         "status": "valid",
     }
-    if model == "G2++ 2F":
-        try:
-            calibration.update(estimate_g2_parameters(await fetch_treasury_history()))
-            calibration["parameterSource"] = "historical-calibration"
-        except Exception as error:
+    try:
+        history = await fetch_treasury_history()
+        if model == "G2++ 2F":
+            calibration.update(estimate_g2_parameters(history))
+        else:
+            calibration.update(estimate_hull_white_parameters(history))
+        calibration["parameterSource"] = "historical-calibration"
+    except Exception as error:
+        if model == "G2++ 2F":
             calibration.update({
                 "meanReversion": 0.10,
                 "volatility": 0.01,
@@ -307,6 +352,15 @@ async def treasury_calibration(model: str) -> dict[str, Any]:
                 "calibrationObjective": "No calibration performed",
                 "observationCount": 0,
                 "parameterBounds": G2_BOUNDS,
+                "fallbackUsed": True,
+                "fallbackReason": str(error),
+            })
+        else:
+            calibration.update({
+                "calibrationSource": "Governed Hull-White fallback parameters",
+                "calibrationObjective": "No calibration performed",
+                "observationCount": 0,
+                "parameterBounds": HW_BOUNDS,
                 "fallbackUsed": True,
                 "fallbackReason": str(error),
             })
@@ -338,11 +392,16 @@ async def get_rates(
         )
         if item.payload.get("model") == model
     ), None)
+    if stored and stored.payload.get("parameterSource") == "governed-default":
+        stored = None
     calibration = stored.payload if stored else await refresh_rate_calibration(session, model)
     calibrated = datetime.fromisoformat(calibration["calibratedAt"])
     if calibrated.tzinfo is None:
         calibrated = calibrated.replace(tzinfo=timezone.utc)
-    stale = (datetime.now(timezone.utc) - calibrated).total_seconds() > 86_400
+    stale = (
+        (datetime.now(timezone.utc) - calibrated).total_seconds() > 86_400
+        or calibration.get("parameterSource") == "governed-default"
+    )
     return {"calibration": calibration, "stale": stale}
 
 

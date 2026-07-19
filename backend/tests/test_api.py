@@ -108,7 +108,7 @@ def test_saves_hull_white_and_g2_calibrations_independently(monkeypatch) -> None
             "secondFactorMeanReversion": 0.3 if model == "G2++ 2F" else None,
             "secondFactorVolatility": 0.015 if model == "G2++ 2F" else None,
             "factorCorrelation": -0.7 if model == "G2++ 2F" else None,
-            "parameterSource": "governed-default",
+            "parameterSource": "historical-calibration",
             "curveSource": "test",
             "curve": [
                 {"maturity": 1, "yield": 0.04, "discountFactor": 0.96},
@@ -156,4 +156,21 @@ def test_estimates_bounded_g2_parameters_from_treasury_history() -> None:
     assert 0.01 <= result["secondFactorMeanReversion"] <= 2.00
     assert 0.001 <= result["secondFactorVolatility"] <= 0.10
     assert -0.95 <= result["factorCorrelation"] <= 0.95
+    assert result["fitRmse"] >= 0
+
+
+def test_estimates_hull_white_parameters_from_treasury_history() -> None:
+    observations = []
+    level = 4.0
+    for day in range(180):
+        level = 4.0 + 0.96 * (level - 4.0) + 0.025 * ((day % 7) - 3)
+        curve = [level + offset for offset in (-0.5, -0.4, -0.3, -0.2, -0.1, 0, 0.1, 0.2, 0.3, 0.4)]
+        observations.append((f"2025-{day // 28 + 1:02d}-{day % 28 + 1:02d}", curve))
+
+    result = desktop_api.estimate_hull_white_parameters(observations)
+
+    assert result["observationCount"] == 180
+    assert result["fallbackUsed"] is False
+    assert 0.01 <= result["meanReversion"] <= 1.50
+    assert 0.001 <= result["volatility"] <= 0.10
     assert result["fitRmse"] >= 0

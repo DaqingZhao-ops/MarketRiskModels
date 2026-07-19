@@ -775,9 +775,7 @@ export function RiskWorkbench() {
             {rateCalibration.calibrationWindowStart && rateCalibration.calibrationWindowEnd ? (
               <div><dt>Calibration window</dt><dd>{rateCalibration.calibrationWindowStart} to {rateCalibration.calibrationWindowEnd}</dd></div>
             ) : null}
-            {rateCalibration.model === "G2++ 2F" ? (
-              <div><dt>Historical fit RMSE</dt><dd>{rateCalibration.fitRmse.toFixed(2)} bp</dd></div>
-            ) : null}
+            <div><dt>Historical fit RMSE</dt><dd>{rateCalibration.fitRmse.toFixed(2)} bp</dd></div>
             {rateCalibration.fallbackUsed ? (
               <div><dt>Fallback</dt><dd>Yes — {rateCalibration.fallbackReason ?? "historical calibration unavailable"}</dd></div>
             ) : null}
