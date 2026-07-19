@@ -152,6 +152,21 @@ h2 { margin: 0; font-size: 25px; letter-spacing: -.035em; }
 .bar i { display: block; height: 100%; background: var(--green); }
 .contributor b { text-align: right; }
 
+.frontier { margin: 0 4vw 26px; }
+.frontier-chart { display: block; width: calc(100% - 40px); max-height: 440px; margin: 0 20px; overflow: visible; }
+.frontier-chart text { fill: var(--muted); font: 9px var(--font-geist-mono); }
+.frontier-grid { stroke: #d9d9d2; stroke-width: 1; }
+.frontier-cloud { fill: #8bab9f; opacity: .28; }
+.frontier-line { fill: none; stroke: var(--green); stroke-width: 2.5; }
+.frontier-current-halo { fill: var(--coral); opacity: .2; }
+.frontier-current { fill: var(--coral); stroke: var(--panel); stroke-width: 2; }
+.frontier-chart .frontier-current-label { fill: var(--ink); font-weight: 700; }
+.frontier-chart .frontier-axis-label { fill: var(--ink); }
+.frontier-summary { display: flex; flex-wrap: wrap; gap: 10px 28px; margin: 0 27px; padding: 16px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); color: var(--muted); font-size: 11px; }
+.frontier-summary b { margin-right: 5px; color: var(--ink); font-size: 14px; }
+.frontier-note, .frontier-loading { margin: 0; padding: 16px 27px 23px; color: var(--muted); font-size: 10px; line-height: 1.55; }
+.frontier-loading { min-height: 180px; }
+
 .positions { margin: 0 4vw 70px; }
 .table-wrap { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; }

@@ -32,6 +32,7 @@ See [docs/architecture.md](docs/architecture.md) and
 - Parametric variance-covariance VaR
 - Expected Shortfall for every model
 - Position-level contributions
+- Historical efficient frontier with the current delta-adjusted portfolio marked
 - One-day and ten-day horizons at 95%, 97.5%, and 99% confidence
 
 The Python historical engine stores up to four years of Yahoo Finance adjusted

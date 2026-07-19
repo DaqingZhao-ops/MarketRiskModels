@@ -7,7 +7,9 @@ import {
   ModelKind,
   Position,
   RiskResult,
+  EfficientFrontierResult,
   calculateRisk,
+  calculateEfficientFrontier,
   enrichPositionsWithHistoricalRisk,
   parsePositionsCsv,
 } from "../lib/risk";
@@ -70,6 +72,51 @@ function Metric({
       <strong>{value}</strong>
       <small>{detail}</small>
     </article>
+  );
+}
+
+function EfficientFrontierChart({ data }: { data: EfficientFrontierResult }) {
+  const width = 760;
+  const height = 340;
+  const margin = { top: 22, right: 24, bottom: 46, left: 64 };
+  const points = [...data.cloud, ...data.frontier, data.current];
+  const maxRisk = Math.max(...points.map((point) => point.risk), 0.01) * 1.08;
+  const minReturn = Math.min(...points.map((point) => point.return), 0) - 0.02;
+  const maxReturn = Math.max(...points.map((point) => point.return), 0.01) + 0.02;
+  const x = (risk: number) => margin.left + risk / maxRisk * (width - margin.left - margin.right);
+  const y = (expectedReturn: number) => margin.top +
+    (maxReturn - expectedReturn) / (maxReturn - minReturn) * (height - margin.top - margin.bottom);
+  const frontierPath = data.frontier.map((point, index) =>
+    `${index ? "L" : "M"} ${x(point.risk).toFixed(1)} ${y(point.return).toFixed(1)}`).join(" ");
+  const xTicks = Array.from({ length: 5 }, (_, index) => maxRisk * index / 4);
+  const yTicks = Array.from({ length: 5 }, (_, index) => minReturn + (maxReturn - minReturn) * index / 4);
+
+  return (
+    <svg className="frontier-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-labelledby="frontier-title frontier-description">
+      <title id="frontier-title">Efficient frontier and current portfolio</title>
+      <desc id="frontier-description">Annualized expected return plotted against annualized volatility. The current portfolio is shown as a highlighted dot.</desc>
+      {xTicks.map((tick) => (
+        <g key={`x-${tick}`}>
+          <line x1={x(tick)} y1={margin.top} x2={x(tick)} y2={height - margin.bottom} className="frontier-grid" />
+          <text x={x(tick)} y={height - 20} textAnchor="middle">{percent.format(tick)}</text>
+        </g>
+      ))}
+      {yTicks.map((tick) => (
+        <g key={`y-${tick}`}>
+          <line x1={margin.left} y1={y(tick)} x2={width - margin.right} y2={y(tick)} className="frontier-grid" />
+          <text x={margin.left - 12} y={y(tick) + 3} textAnchor="end">{percent.format(tick)}</text>
+        </g>
+      ))}
+      {data.cloud.map((point, index) => (
+        <circle key={index} cx={x(point.risk)} cy={y(point.return)} r="2.3" className="frontier-cloud" />
+      ))}
+      <path d={frontierPath} className="frontier-line" />
+      <circle cx={x(data.current.risk)} cy={y(data.current.return)} r="7" className="frontier-current-halo" />
+      <circle cx={x(data.current.risk)} cy={y(data.current.return)} r="4" className="frontier-current" />
+      <text x={x(data.current.risk) + 10} y={y(data.current.return) - 9} className="frontier-current-label">Current portfolio</text>
+      <text x={width / 2} y={height - 3} textAnchor="middle" className="frontier-axis-label">Annualized volatility</text>
+      <text transform={`translate(15 ${height / 2}) rotate(-90)`} textAnchor="middle" className="frontier-axis-label">Expected annual return</text>
+    </svg>
   );
 }
 
@@ -158,6 +205,10 @@ export function RiskWorkbench() {
   }, [positions, model, confidence, horizon]);
 
   const result = remoteResult ?? continuityResult;
+  const frontier = useMemo(
+    () => calculateEfficientFrontier(positions, history),
+    [positions, history],
+  );
   const displayedPositions = useMemo(
     () => positions
       .map((position, index) => ({ position, index }))
@@ -218,6 +269,7 @@ export function RiskWorkbench() {
         </a>
         <nav aria-label="Page sections">
           <a href="#overview">Overview</a>
+          <a href="#frontier">Efficient frontier</a>
           <a href="#positions">Positions</a>
           <a href="#methodology">Methodology</a>
         </nav>
@@ -375,6 +427,36 @@ export function RiskWorkbench() {
             ))}
           </div>
         </article>
+      </section>
+
+      <section className="frontier panel" id="frontier">
+        <div className="panel-heading">
+          <div>
+            <p className="eyebrow">Portfolio construction</p>
+            <h2>Efficient frontier</h2>
+          </div>
+          {frontier && <span className="model-pill">{frontier.assetCount} mapped assets</span>}
+        </div>
+        {frontier ? (
+          <>
+            <EfficientFrontierChart data={frontier} />
+            <div className="frontier-summary">
+              <span><b>{percent.format(frontier.current.return)}</b> expected return</span>
+              <span><b>{percent.format(frontier.current.risk)}</b> volatility</span>
+              <span><b>{frontier.current.sharpe.toFixed(2)}</b> Sharpe ratio</span>
+              <span>{frontier.observations.toLocaleString()} overlapping daily returns</span>
+            </div>
+            <p className="frontier-note">
+              Long-only simulated portfolios form the opportunity set and upper frontier.
+              The current portfolio dot uses position market values and delta-adjusted option exposure.
+              {frontier.excluded.length
+                ? ` Excluded for insufficient history: ${frontier.excluded.join(", ")}.`
+                : ""}
+            </p>
+          </>
+        ) : (
+          <p className="frontier-loading">Loading enough overlapping history to construct the frontier…</p>
+        )}
       </section>
 
       <section className="positions panel" id="positions">

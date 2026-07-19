@@ -47,6 +47,20 @@ export type RiskResult = {
   runId?: number;
 };
 
+export type FrontierPoint = {
+  risk: number;
+  return: number;
+};
+
+export type EfficientFrontierResult = {
+  cloud: FrontierPoint[];
+  frontier: FrontierPoint[];
+  current: FrontierPoint & { sharpe: number };
+  assetCount: number;
+  observations: number;
+  excluded: string[];
+};
+
 export const DEFAULT_POSITIONS: Position[] = [
   { id: "aapl", symbol: "AAPL", type: "Stock", quantity: 100, price: 220, multiplier: 1, marketValue: 22000, volatility: 0.29, beta: 1.18, delta: 1 },
   { id: "amzn", symbol: "AMZN", type: "Stock", quantity: 200, price: 225, multiplier: 1, marketValue: 45000, volatility: 0.32, beta: 1.2, delta: 1 },
@@ -157,6 +171,97 @@ function normalCdf(value: number) {
   const erf = 1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t -
     0.284496736) * t + 0.254829592) * t * Math.exp(-x * x);
   return 0.5 * (1 + sign * erf);
+}
+
+export function calculateEfficientFrontier(
+  positions: Position[],
+  history?: HistoricalData,
+): EfficientFrontierResult | undefined {
+  if (!history) return undefined;
+  const uniqueSeries = [...new Map(
+    history.series
+      .filter((series) => series.adjustedClose.length >= 60)
+      .map((series) => [series.sourceSymbol, series]),
+  ).values()];
+  if (uniqueSeries.length < 2) return undefined;
+
+  const commonDates = uniqueSeries[0].dates.filter((date) =>
+    uniqueSeries.every((series) => series.dates.includes(date)));
+  if (commonDates.length < 60) return undefined;
+  const returnsByAsset = uniqueSeries.map((series) => {
+    const prices = new Map(series.dates.map((date, index) => [date, series.adjustedClose[index]]));
+    return commonDates.slice(1).map((date, index) => {
+      const previous = prices.get(commonDates[index]) ?? 0;
+      return (prices.get(date) ?? previous) / previous - 1;
+    });
+  });
+  const means = returnsByAsset.map((returns) =>
+    returns.reduce((sum, value) => sum + value, 0) / returns.length * 252);
+  const covariance = returnsByAsset.map((left, leftIndex) =>
+    returnsByAsset.map((right, rightIndex) => {
+      const leftDailyMean = means[leftIndex] / 252;
+      const rightDailyMean = means[rightIndex] / 252;
+      return left.reduce(
+        (sum, value, index) =>
+          sum + (value - leftDailyMean) * (right[index] - rightDailyMean),
+        0,
+      ) / (left.length - 1) * 252;
+    }));
+
+  const pointFor = (weights: number[]): FrontierPoint => {
+    const expectedReturn = weights.reduce((sum, weight, index) => sum + weight * means[index], 0);
+    const variance = weights.reduce((outer, leftWeight, leftIndex) =>
+      outer + weights.reduce((inner, rightWeight, rightIndex) =>
+        inner + leftWeight * rightWeight * covariance[leftIndex][rightIndex], 0), 0);
+    return { risk: Math.sqrt(Math.max(variance, 0)), return: expectedReturn };
+  };
+
+  const random = mulberry32(20260719 + uniqueSeries.length * 17);
+  const portfolios: FrontierPoint[] = [];
+  for (let iteration = 0; iteration < 5000; iteration += 1) {
+    const raw = uniqueSeries.map(() => -Math.log(Math.max(random(), Number.EPSILON)));
+    const total = raw.reduce((sum, value) => sum + value, 0);
+    portfolios.push(pointFor(raw.map((value) => value / total)));
+  }
+  uniqueSeries.forEach((_, index) => {
+    portfolios.push(pointFor(uniqueSeries.map((__, assetIndex) => assetIndex === index ? 1 : 0)));
+  });
+  const sorted = [...portfolios].sort((left, right) => left.risk - right.risk || right.return - left.return);
+  const frontier: FrontierPoint[] = [];
+  let bestReturn = -Infinity;
+  for (const point of sorted) {
+    if (point.return > bestReturn + 0.00025) {
+      frontier.push(point);
+      bestReturn = point.return;
+    }
+  }
+
+  const sourceIndex = new Map(uniqueSeries.map((series, index) => [series.sourceSymbol, index]));
+  const currentWeights = uniqueSeries.map(() => 0);
+  const totalMarketValue = positions.reduce((sum, position) => sum + Math.abs(position.marketValue), 0) || 1;
+  const excluded: string[] = [];
+  for (const position of positions) {
+    const source = history.mappings[position.symbol];
+    const index = sourceIndex.get(source);
+    if (index === undefined) {
+      excluded.push(position.symbol);
+    } else {
+      currentWeights[index] += position.marketValue * position.delta / totalMarketValue;
+    }
+  }
+  const currentPoint = pointFor(currentWeights);
+  const riskFreeRate = 0.043;
+  return {
+    cloud: portfolios.filter((_, index) => index % 14 === 0).slice(0, 400),
+    frontier,
+    current: {
+      ...currentPoint,
+      sharpe: currentPoint.risk > 0 ? (currentPoint.return - riskFreeRate) / currentPoint.risk : 0,
+    },
+    assetCount: uniqueSeries.length,
+    observations: commonDates.length - 1,
+    excluded: [...new Set(excluded)],
+  };
 }
 
 function mulberry32(seed: number) {

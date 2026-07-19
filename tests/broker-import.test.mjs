@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { enrichPositionsWithHistoricalRisk, parsePositionsCsv } from "../lib/risk.ts";
+import {
+  calculateEfficientFrontier,
+  enrichPositionsWithHistoricalRisk,
+  parsePositionsCsv,
+} from "../lib/risk.ts";
 
 test("imports a Fidelity positions export", () => {
   const csv = `Account Number,Account Name,Symbol,Description,Quantity,Last Price,Current Value,Type
@@ -68,4 +72,39 @@ test("calculates missing broker risk factors from historical prices", () => {
   assert.equal(enriched.riskSource, "historical");
   assert.ok(enriched.volatility > 0);
   assert.ok(Math.abs(enriched.beta - 2) < 1e-10);
+});
+
+test("builds an efficient frontier and locates the current portfolio", () => {
+  const dates = Array.from({ length: 91 }, (_, index) =>
+    new Date(Date.UTC(2025, 0, index + 1)).toISOString().slice(0, 10));
+  const seriesFor = (symbol, start, phase, drift) => {
+    const prices = [start];
+    for (let index = 1; index < dates.length; index += 1) {
+      const dailyReturn = drift + Math.sin(index * 0.61 + phase) * 0.008;
+      prices.push(prices.at(-1) * (1 + dailyReturn));
+    }
+    return { symbol, sourceSymbol: symbol, dates, adjustedClose: prices };
+  };
+  const positions = [
+    { id: "a", symbol: "AAA", type: "Stock", quantity: 10, price: 100, multiplier: 1, marketValue: 1000, volatility: 0.2, beta: 1, delta: 1 },
+    { id: "b", symbol: "BBB", type: "Stock", quantity: 10, price: 100, multiplier: 1, marketValue: 1000, volatility: 0.2, beta: 1, delta: 1 },
+    { id: "c", symbol: "CCC", type: "Stock", quantity: 10, price: 100, multiplier: 1, marketValue: 1000, volatility: 0.2, beta: 1, delta: 1 },
+  ];
+  const result = calculateEfficientFrontier(positions, {
+    source: "test",
+    fetchedAt: "2026-01-01",
+    mappings: { AAA: "AAA", BBB: "BBB", CCC: "CCC" },
+    series: [
+      seriesFor("AAA", 100, 0, 0.0004),
+      seriesFor("BBB", 80, 1.7, 0.0006),
+      seriesFor("CCC", 120, 3.1, 0.0003),
+    ],
+  });
+  assert.ok(result);
+  assert.equal(result.assetCount, 3);
+  assert.equal(result.observations, 90);
+  assert.ok(result.cloud.length > 100);
+  assert.ok(result.frontier.length > 1);
+  assert.ok(Number.isFinite(result.current.risk));
+  assert.ok(Number.isFinite(result.current.return));
 });

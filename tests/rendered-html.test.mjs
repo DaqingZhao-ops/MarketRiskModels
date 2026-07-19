@@ -33,6 +33,8 @@ test("server-renders the market risk workbench", async () => {
   assert.match(html, /See the loss before/);
   assert.match(html, /Historical simulation/);
   assert.match(html, /Expected shortfall/);
+  assert.match(html, /Efficient frontier/);
+  assert.match(html, /Loading enough overlapping history/);
   assert.match(html, /Positions &amp; sensitivities/);
   assert.match(html, /Risk source/);
   assert.match(html, /Calculating…/);
