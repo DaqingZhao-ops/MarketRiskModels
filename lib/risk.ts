@@ -11,6 +11,7 @@ export type Position = {
   volatility: number;
   beta: number;
   delta: number;
+  riskSource?: "provided" | "historical-pending" | "historical" | "fallback";
 };
 
 export type Contribution = Position & { amount: number; share: number };
@@ -75,6 +76,88 @@ export const DEFAULT_POSITIONS: Position[] = [
   { id: "tlt-put", symbol: "TLT P80", type: "Bond Option", quantity: 25, price: 3.2, multiplier: 100, marketValue: 8000, volatility: 0.35, beta: -0.2, delta: -0.32 },
   { id: "ief-put", symbol: "IEF P90", type: "Bond Option", quantity: 20, price: 2.4, multiplier: 100, marketValue: 4800, volatility: 0.2, beta: -0.12, delta: -0.25 },
 ];
+
+export function enrichPositionsWithHistoricalRisk(
+  positions: Position[],
+  history: HistoricalData,
+  asOf = new Date(),
+) {
+  const benchmark = history.series.find((item) => item.symbol === "SPY");
+  return positions.map((position) => {
+    if (position.riskSource !== "historical-pending") return position;
+    const series = history.series.find((item) => item.symbol === position.symbol);
+    if (!series || series.adjustedClose.length < 30) {
+      return { ...position, riskSource: "fallback" as const };
+    }
+    const returns = dailyReturns(series);
+    const volatility = historicalDeviation(returns.map((item) => item.value)) * Math.sqrt(252);
+    const beta = benchmark ? historicalBeta(series, benchmark) : position.beta;
+    const optionDelta = position.type.endsWith("Option")
+      ? blackScholesDelta(position.symbol, series.adjustedClose.at(-1) ?? 0, volatility, asOf)
+      : 1;
+    return {
+      ...position,
+      volatility: Number.isFinite(volatility) && volatility > 0 ? volatility : position.volatility,
+      beta: Number.isFinite(beta) ? beta : position.beta,
+      delta: optionDelta ?? position.delta,
+      riskSource: "historical" as const,
+    };
+  });
+}
+
+function dailyReturns(series: HistoricalSeries) {
+  return series.adjustedClose.slice(1).map((price, index) => ({
+    date: series.dates[index + 1],
+    value: price / series.adjustedClose[index] - 1,
+  })).filter((item) => Number.isFinite(item.value));
+}
+
+function historicalDeviation(values: number[]) {
+  if (values.length < 2) return Number.NaN;
+  const mean = values.reduce((sum, value) => sum + value, 0) / values.length;
+  return Math.sqrt(values.reduce((sum, value) => sum + (value - mean) ** 2, 0) / (values.length - 1));
+}
+
+function historicalBeta(asset: HistoricalSeries, benchmark: HistoricalSeries) {
+  const benchmarkReturns = new Map(dailyReturns(benchmark).map((item) => [item.date, item.value]));
+  const pairs = dailyReturns(asset)
+    .filter((item) => benchmarkReturns.has(item.date))
+    .map((item) => [item.value, benchmarkReturns.get(item.date) ?? 0]);
+  if (pairs.length < 30) return Number.NaN;
+  const assetMean = pairs.reduce((sum, pair) => sum + pair[0], 0) / pairs.length;
+  const marketMean = pairs.reduce((sum, pair) => sum + pair[1], 0) / pairs.length;
+  const covariance = pairs.reduce(
+    (sum, pair) => sum + (pair[0] - assetMean) * (pair[1] - marketMean),
+    0,
+  ) / (pairs.length - 1);
+  const variance = pairs.reduce((sum, pair) => sum + (pair[1] - marketMean) ** 2, 0) / (pairs.length - 1);
+  return variance > 0 ? covariance / variance : Number.NaN;
+}
+
+function blackScholesDelta(symbol: string, spot: number, volatility: number, asOf: Date) {
+  const compact = symbol.replace(/^[+-]/, "").replace(/\s/g, "");
+  const match = compact.match(/^[A-Z]{1,6}(\d{6})([CP])(\d{8})$/i);
+  if (!match || spot <= 0 || volatility <= 0) return undefined;
+  const [, date, callPut, strikeDigits] = match;
+  const expiration = new Date(
+    Date.UTC(2000 + Number(date.slice(0, 2)), Number(date.slice(2, 4)) - 1, Number(date.slice(4, 6)), 21),
+  );
+  const years = Math.max((expiration.getTime() - asOf.getTime()) / (365.25 * 86400000), 1 / 365.25);
+  const strike = Number(strikeDigits) / 1000;
+  const d1 = (Math.log(spot / strike) + (0.043 + volatility ** 2 / 2) * years) /
+    (volatility * Math.sqrt(years));
+  const callDelta = normalCdf(d1);
+  return callPut.toUpperCase() === "P" ? callDelta - 1 : callDelta;
+}
+
+function normalCdf(value: number) {
+  const sign = value < 0 ? -1 : 1;
+  const x = Math.abs(value) / Math.sqrt(2);
+  const t = 1 / (1 + 0.3275911 * x);
+  const erf = 1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t -
+    0.284496736) * t + 0.254829592) * t * Math.exp(-x * x);
+  return 0.5 * (1 + sign * erf);
+}
 
 function mulberry32(seed: number) {
   return () => {
@@ -353,6 +436,7 @@ export function parsePositionsCsv(text: string): Position[] {
       volatility: nativeFormat ? parseBrokerNumber(field(record, "volatility")) : defaults.volatility,
       beta: nativeFormat ? parseBrokerNumber(field(record, "beta")) : defaults.beta,
       delta: nativeFormat ? parseBrokerNumber(field(record, "delta")) : defaults.delta,
+      riskSource: nativeFormat ? "provided" : "historical-pending",
     };
     if (Object.values(position).some((value) => typeof value === "number" && !Number.isFinite(value))) {
       throw new Error(`Invalid values on CSV row ${headerIndex + index + 2}.`);

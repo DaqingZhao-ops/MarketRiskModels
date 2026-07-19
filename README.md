@@ -84,8 +84,10 @@ Import a Charles Schwab or Fidelity positions CSV directly. The importer recogni
 their common Symbol, Description, Quantity, Price, and Market/Current Value column
 names, including currency formatting and quoted descriptions. Cash, totals, and
 account-summary rows are ignored. Because broker position exports do not contain
-risk sensitivities, the app assigns editable volatility, beta, and delta estimates
-based on the inferred instrument class.
+risk sensitivities, the app calculates annualized volatility and SPY beta from
+downloaded daily adjusted-close history. Recognizable OCC option symbols also
+receive a Black-Scholes delta using historical volatility; otherwise an editable
+instrument-class fallback is retained.
 
 The app's native CSV format remains supported:
 

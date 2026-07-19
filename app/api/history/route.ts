@@ -10,6 +10,10 @@ const PROXIES: Record<string, string> = {
 function sourceSymbol(symbol: string) {
   const normalized = symbol.trim().toUpperCase();
   if (PROXIES[normalized]) return PROXIES[normalized];
+  const occOption = normalized.replace(/^[+-]/, "").replace(/\s/g, "")
+    .match(/^([A-Z]{1,6})\d{6}[CP]\d{8}$/);
+  if (occOption) return occOption[1];
+  if (/^[A-Z0-9]{9}$/.test(normalized)) return "IEF";
   if (normalized.includes(" ")) return normalized.split(" ")[0];
   return normalized;
 }
@@ -79,9 +83,11 @@ export async function GET(request: NextRequest) {
   const period2 = Math.floor(Date.now() / 1000) + 86400;
   const period1 = period2 - 4 * 366 * 86400;
   try {
-    const series = await Promise.all(
+    const results = await Promise.allSettled(
       symbols.map((symbol) => fetchSeries(symbol, period1, period2)),
     );
+    const series = results.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
+    if (!series.length) throw new Error("No price history was returned for the imported positions.");
     return NextResponse.json({
       source: "Yahoo Finance adjusted daily close",
       fetchedAt: new Date().toISOString(),

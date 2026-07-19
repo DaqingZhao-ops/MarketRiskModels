@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { parsePositionsCsv } from "../lib/risk.ts";
+import { enrichPositionsWithHistoricalRisk, parsePositionsCsv } from "../lib/risk.ts";
 
 test("imports a Fidelity positions export", () => {
   const csv = `Account Number,Account Name,Symbol,Description,Quantity,Last Price,Current Value,Type
@@ -44,4 +44,28 @@ AAPL,Stock,100,220,1,22000,0.29,1.18,1`;
   const [position] = parsePositionsCsv(csv);
   assert.equal(position.volatility, 0.29);
   assert.equal(position.beta, 1.18);
+});
+
+test("calculates missing broker risk factors from historical prices", () => {
+  const [position] = parsePositionsCsv(
+    "Symbol,Description,Quantity,Price,Market Value\nAAPL,APPLE INC,100,$220,\"$22,000\"",
+  );
+  const dates = Array.from({ length: 61 }, (_, index) =>
+    new Date(Date.UTC(2026, 0, index + 1)).toISOString().slice(0, 10));
+  const marketReturns = Array.from({ length: 60 }, (_, index) => index % 2 ? -0.006 : 0.008);
+  const prices = (returns, start) =>
+    returns.reduce((values, value) => [...values, values.at(-1) * (1 + value)], [start]);
+  const history = {
+    source: "test",
+    fetchedAt: "2026-03-02T00:00:00Z",
+    mappings: { AAPL: "AAPL", SPY: "SPY" },
+    series: [
+      { symbol: "AAPL", sourceSymbol: "AAPL", dates, adjustedClose: prices(marketReturns.map((value) => value * 2), 100) },
+      { symbol: "SPY", sourceSymbol: "SPY", dates, adjustedClose: prices(marketReturns, 500) },
+    ],
+  };
+  const [enriched] = enrichPositionsWithHistoricalRisk([position], history);
+  assert.equal(enriched.riskSource, "historical");
+  assert.ok(enriched.volatility > 0);
+  assert.ok(Math.abs(enriched.beta - 2) < 1e-10);
 });

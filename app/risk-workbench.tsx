@@ -8,6 +8,7 @@ import {
   Position,
   RiskResult,
   calculateRisk,
+  enrichPositionsWithHistoricalRisk,
   parsePositionsCsv,
 } from "../lib/risk";
 
@@ -69,7 +70,10 @@ export function RiskWorkbench() {
   const [engineStatus, setEngineStatus] = useState("Connecting to Python engine…");
 
   const symbolsKey = useMemo(
-    () => [...new Set(positions.map((position) => position.symbol.trim().toUpperCase()))]
+    () => [...new Set([
+      ...positions.map((position) => position.symbol.trim().toUpperCase()),
+      "SPY",
+    ])]
       .sort()
       .join(","),
     [positions],
@@ -87,6 +91,7 @@ export function RiskWorkbench() {
         const payload = await response.json();
         if (!response.ok) throw new Error(payload.error ?? "Unable to load market history.");
         setHistory(payload as HistoricalData);
+        setPositions((current) => enrichPositionsWithHistoricalRisk(current, payload as HistoricalData));
         setHistoryStatus("Market history loaded.");
       } catch (error) {
         if (controller.signal.aborted) return;
@@ -154,6 +159,9 @@ export function RiskWorkbench() {
           updated.marketValue = Math.abs(
             updated.quantity * updated.price * updated.multiplier,
           );
+        }
+        if (field === "volatility" || field === "beta" || field === "delta") {
+          updated.riskSource = "provided";
         }
         return updated;
       }),
