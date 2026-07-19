@@ -698,7 +698,6 @@ export function RiskWorkbench() {
           <a href="#overview">Overview</a>
           <a href="#frontier">Efficient frontier</a>
           <a href="#positions">Positions</a>
-          <a href="#diagnostics">Diagnostics</a>
           <a href="#methodology">Methodology</a>
         </nav>
         <div className="status"><i /> {engineStatus}</div>
@@ -868,6 +867,59 @@ export function RiskWorkbench() {
           </small>
         </div>
       </section>
+
+      <details className="diagnostics panel" id="diagnostics">
+        <summary>
+          <span>
+            <span className="eyebrow">Backend model governance</span>
+            <strong>Fit quality & data diagnostics</strong>
+          </span>
+          <span className={`diagnostic-overall ${diagnosticWarnings.length ? "diagnostic-review" : "diagnostic-healthy"}`}>
+            {diagnosticWarnings.length ? `${diagnosticWarnings.length} item${diagnosticWarnings.length === 1 ? "" : "s"} to review` : "No active warnings"}
+          </span>
+        </summary>
+        <div className="diagnostic-grid">
+          <article>
+            <header><span>Risk engine</span><strong>{remoteResult ? "Connected" : "Continuity mode"}</strong></header>
+            <dl>
+              <div><dt>Backend</dt><dd>{remoteResult ? "Python + SQLAlchemy" : "TypeScript fallback"}</dd></div>
+              <div><dt>Active model</dt><dd>{MODEL_COPY[model].label}</dd></div>
+              <div><dt>Scenarios</dt><dd>{result.observations.toLocaleString()}</dd></div>
+              <div><dt>Coverage</dt><dd>{result.historyStart && result.historyEnd ? `${result.historyStart} to ${result.historyEnd}` : "Unavailable"}</dd></div>
+              <div><dt>Audit record</dt><dd>{result.runId ? `Run ${result.runId}` : "Not persisted"}</dd></div>
+            </dl>
+          </article>
+          <article>
+            <header><span>Interest-rate fit</span><strong className={`fit-${rateFitQuality.toLowerCase()}`}>{rateFitQuality}</strong></header>
+            <dl>
+              <div><dt>Model</dt><dd>{rateCalibration?.model ?? "Unavailable"}</dd></div>
+              <div><dt>Fit RMSE</dt><dd>{rateCalibration ? `${rateCalibration.fitRmse.toFixed(2)} bp` : "Unavailable"}</dd></div>
+              <div><dt>Observations</dt><dd>{rateCalibration?.observationCount?.toLocaleString() ?? "Unavailable"}</dd></div>
+              <div><dt>Window</dt><dd>{rateCalibration?.calibrationWindowStart && rateCalibration.calibrationWindowEnd ? `${rateCalibration.calibrationWindowStart} to ${rateCalibration.calibrationWindowEnd}` : "Unavailable"}</dd></div>
+              <div><dt>Method</dt><dd>{rateCalibration?.calibrationObjective ?? "Governed parameters"}</dd></div>
+            </dl>
+          </article>
+          <article>
+            <header><span>Market data</span><strong>{history ? "Loaded" : "Unavailable"}</strong></header>
+            <dl>
+              <div><dt>Price source</dt><dd>{history?.source ?? "Unavailable"}</dd></div>
+              <div><dt>Series loaded</dt><dd>{history?.series.length.toLocaleString() ?? "0"}</dd></div>
+              <div><dt>Fetched</dt><dd>{history?.fetchedAt ? new Date(history.fetchedAt).toLocaleString() : "Unavailable"}</dd></div>
+              <div><dt>Rate source</dt><dd>{rateCalibration?.curveSource ?? "Unavailable"}</dd></div>
+              <div><dt>Persistence</dt><dd>SQLite market cache and portfolio versions</dd></div>
+            </dl>
+          </article>
+        </div>
+        <div className="diagnostic-warnings">
+          <h3>Data-quality warnings</h3>
+          {diagnosticWarnings.length ? (
+            <ul>{diagnosticWarnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>
+          ) : (
+            <p>No current backend fit or data-coverage warning crossed its review threshold.</p>
+          )}
+          <small>Thresholds: rate-factor RMSE above 20 bp, fewer than 500 rate observations, fewer than 250 synchronized historical scenarios, fallback parameters, pending risk factors, or unavailable Python/history services.</small>
+        </div>
+      </details>
 
       <section className="metrics" id="overview">
         <Metric
@@ -1057,59 +1109,6 @@ export function RiskWorkbench() {
         ) : (
           <p className="frontier-loading">Loading enough overlapping history to construct the frontier…</p>
         )}
-      </section>
-
-      <section className="diagnostics panel" id="diagnostics">
-        <div className="panel-heading">
-          <div>
-            <p className="eyebrow">Backend model governance</p>
-            <h2>Fit quality & data diagnostics</h2>
-          </div>
-          <span className={`diagnostic-overall ${diagnosticWarnings.length ? "diagnostic-review" : "diagnostic-healthy"}`}>
-            {diagnosticWarnings.length ? `${diagnosticWarnings.length} item${diagnosticWarnings.length === 1 ? "" : "s"} to review` : "No active warnings"}
-          </span>
-        </div>
-        <div className="diagnostic-grid">
-          <article>
-            <header><span>Risk engine</span><strong>{remoteResult ? "Connected" : "Continuity mode"}</strong></header>
-            <dl>
-              <div><dt>Backend</dt><dd>{remoteResult ? "Python + SQLAlchemy" : "TypeScript fallback"}</dd></div>
-              <div><dt>Active model</dt><dd>{MODEL_COPY[model].label}</dd></div>
-              <div><dt>Scenarios</dt><dd>{result.observations.toLocaleString()}</dd></div>
-              <div><dt>Coverage</dt><dd>{result.historyStart && result.historyEnd ? `${result.historyStart} to ${result.historyEnd}` : "Unavailable"}</dd></div>
-              <div><dt>Audit record</dt><dd>{result.runId ? `Run ${result.runId}` : "Not persisted"}</dd></div>
-            </dl>
-          </article>
-          <article>
-            <header><span>Interest-rate fit</span><strong className={`fit-${rateFitQuality.toLowerCase()}`}>{rateFitQuality}</strong></header>
-            <dl>
-              <div><dt>Model</dt><dd>{rateCalibration?.model ?? "Unavailable"}</dd></div>
-              <div><dt>Fit RMSE</dt><dd>{rateCalibration ? `${rateCalibration.fitRmse.toFixed(2)} bp` : "Unavailable"}</dd></div>
-              <div><dt>Observations</dt><dd>{rateCalibration?.observationCount?.toLocaleString() ?? "Unavailable"}</dd></div>
-              <div><dt>Window</dt><dd>{rateCalibration?.calibrationWindowStart && rateCalibration.calibrationWindowEnd ? `${rateCalibration.calibrationWindowStart} to ${rateCalibration.calibrationWindowEnd}` : "Unavailable"}</dd></div>
-              <div><dt>Method</dt><dd>{rateCalibration?.calibrationObjective ?? "Governed parameters"}</dd></div>
-            </dl>
-          </article>
-          <article>
-            <header><span>Market data</span><strong>{history ? "Loaded" : "Unavailable"}</strong></header>
-            <dl>
-              <div><dt>Price source</dt><dd>{history?.source ?? "Unavailable"}</dd></div>
-              <div><dt>Series loaded</dt><dd>{history?.series.length.toLocaleString() ?? "0"}</dd></div>
-              <div><dt>Fetched</dt><dd>{history?.fetchedAt ? new Date(history.fetchedAt).toLocaleString() : "Unavailable"}</dd></div>
-              <div><dt>Rate source</dt><dd>{rateCalibration?.curveSource ?? "Unavailable"}</dd></div>
-              <div><dt>Persistence</dt><dd>SQLite market cache and portfolio versions</dd></div>
-            </dl>
-          </article>
-        </div>
-        <div className="diagnostic-warnings">
-          <h3>Data-quality warnings</h3>
-          {diagnosticWarnings.length ? (
-            <ul>{diagnosticWarnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>
-          ) : (
-            <p>No current backend fit or data-coverage warning crossed its review threshold.</p>
-          )}
-          <small>Thresholds: rate-factor RMSE above 20 bp, fewer than 500 rate observations, fewer than 250 synchronized historical scenarios, fallback parameters, pending risk factors, or unavailable Python/history services.</small>
-        </div>
       </section>
 
       <section className="positions panel" id="positions">

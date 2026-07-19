@@ -260,7 +260,16 @@ h2 { margin: 0; font-size: 25px; letter-spacing: -.035em; }
 .frontier-loading { min-height: 180px; }
 
 .positions { margin: 0 4vw 70px; }
-.diagnostics { margin: 0 4vw 32px; }
+.diagnostics { margin: 8px 4vw 10px; }
+.diagnostics > summary { min-height: 62px; padding: 14px 24px; display: flex; align-items: center; justify-content: space-between; gap: 16px; cursor: pointer; list-style: none; user-select: none; }
+.diagnostics > summary::-webkit-details-marker { display: none; }
+.diagnostics > summary > span:first-child { display: grid; gap: 4px; }
+.diagnostics > summary strong { font-size: 14px; }
+.diagnostics > summary::after { content: "＋"; color: var(--green); font-size: 18px; order: 3; }
+.diagnostics[open] > summary { border-bottom: 1px solid var(--line); }
+.diagnostics[open] > summary::after { content: "−"; }
+.diagnostics[open] .diagnostic-grid { padding-top: 22px; }
+.diagnostics > summary:focus-visible { outline: 2px solid #88a99b; outline-offset: -2px; }
 .diagnostic-overall { padding: 7px 10px; border-radius: 999px; font: 9px var(--font-geist-mono); text-transform: uppercase; letter-spacing: .05em; }
 .diagnostic-healthy { background: #dcece3; color: #285f48; }
 .diagnostic-review { background: #eee8d6; color: #765f22; }
