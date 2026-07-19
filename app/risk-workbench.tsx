@@ -1,6 +1,6 @@
 "use client";
 
-import { ChangeEvent, DragEvent, KeyboardEvent, useEffect, useMemo, useState } from "react";
+import { ChangeEvent, DragEvent, KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   DEFAULT_POSITIONS,
   HistoricalData,
@@ -186,6 +186,7 @@ function EfficientFrontierChart({ data }: { data: EfficientFrontierResult }) {
 
 export function RiskWorkbench() {
   const [positions, setPositions] = useState<Position[]>(DEFAULT_POSITIONS);
+  const positionsRef = useRef(positions);
   const [model, setModel] = useState<ModelKind>("historical");
   const [confidence, setConfidence] = useState(0.99);
   const [horizon, setHorizon] = useState(1);
@@ -209,6 +210,10 @@ export function RiskWorkbench() {
   const [manualPositionOrder, setManualPositionOrder] = useState(false);
   const [selectedPositionId, setSelectedPositionId] = useState<string>();
   const [draggedPositionId, setDraggedPositionId] = useState<string>();
+
+  useEffect(() => {
+    positionsRef.current = positions;
+  }, [positions]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -282,14 +287,33 @@ export function RiskWorkbench() {
         const payload = await response.json();
         if (!response.ok) throw new Error(payload.error ?? "Unable to load market history.");
         setHistory(payload as HistoricalData);
-        setPositions((current) =>
-          enrichPositionsWithHistoricalRisk(
-            current,
-            payload as HistoricalData,
-            new Date(),
-            rateCalibration,
-          ));
+        const enriched = enrichPositionsWithHistoricalRisk(
+          positionsRef.current,
+          payload as HistoricalData,
+          new Date(),
+          rateCalibration,
+        );
+        setPositions(enriched);
         setHistoryStatus("Latest eligible prices and market history loaded.");
+        try {
+          const persistResponse = await fetch("/api/portfolios", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ positions: enriched }),
+            signal: controller.signal,
+          });
+          const persistPayload = await persistResponse.json();
+          if (!persistResponse.ok) {
+            throw new Error(persistPayload.error ?? "Calculated risk factors could not be saved.");
+          }
+          setPortfolioVersions(persistPayload.versions as PortfolioVersion[]);
+          setPortfolioSaveStatus("Calculated risk factors saved to the current default.");
+        } catch (error) {
+          if (controller.signal.aborted) return;
+          setPortfolioSaveStatus(
+            error instanceof Error ? error.message : "Calculated risk factors could not be saved.",
+          );
+        }
       } catch (error) {
         if (controller.signal.aborted) return;
         setHistory(undefined);

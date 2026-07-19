@@ -117,3 +117,23 @@ export async function POST(request: Request) {
   await db.batch(statements);
   return NextResponse.json({ versions: await listVersions(db) });
 }
+
+export async function PUT(request: Request) {
+  const payload = await request.json() as { positions?: Position[] };
+  if (!Array.isArray(payload.positions) || !payload.positions.length) {
+    return NextResponse.json({ error: "A non-empty portfolio is required." }, { status: 400 });
+  }
+  const db = await database();
+  await ensureSchema(db);
+  const current = await db.prepare(
+    "SELECT id FROM portfolio_versions WHERE is_default = 1 LIMIT 1",
+  ).all<{ id: string }>();
+  const currentId = current.results?.[0]?.id;
+  if (!currentId) {
+    return NextResponse.json({ error: "No current default portfolio was found." }, { status: 404 });
+  }
+  await db.prepare(
+    "UPDATE portfolio_versions SET positions_json = ? WHERE id = ?",
+  ).bind(JSON.stringify(payload.positions), currentId).run();
+  return NextResponse.json({ versions: await listVersions(db) });
+}
