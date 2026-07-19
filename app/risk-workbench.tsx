@@ -78,7 +78,7 @@ export function RiskWorkbench() {
   const [model, setModel] = useState<ModelKind>("historical");
   const [confidence, setConfidence] = useState(0.99);
   const [horizon, setHorizon] = useState(1);
-  const [message, setMessage] = useState("Sample diversified portfolio loaded.");
+  const [message, setMessage] = useState("Default portfolio loaded; calculating risk factors from history.");
   const [history, setHistory] = useState<HistoricalData>();
   const [historyStatus, setHistoryStatus] = useState("Loading market history…");
   const [remoteResult, setRemoteResult] = useState<RiskResult>();

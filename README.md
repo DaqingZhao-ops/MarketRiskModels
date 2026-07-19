@@ -79,6 +79,9 @@ The default portfolio contains the requested AAPL, AMZN, GOOG, META, MSFT,
 BABA, NVDA, INTC, COST, KLAC, SPY, SCHD, and FAGIX share quantities, plus
 representative equity options, Treasury exposures, and Treasury options.
 Prices and option premiums are illustrative inputs and can be edited.
+On load, eligible default rows replace their initial risk assumptions with
+historical volatility and SPY beta calculations. A row uses fallback values
+only when adequate market history is unavailable.
 
 Import a Charles Schwab or Fidelity positions CSV directly. The importer recognizes
 their common Symbol, Description, Quantity, Price, and Market/Current Value column

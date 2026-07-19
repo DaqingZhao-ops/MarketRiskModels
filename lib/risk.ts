@@ -75,7 +75,7 @@ export const DEFAULT_POSITIONS: Position[] = [
   { id: "tlt-call", symbol: "TLT C100", type: "Bond Option", quantity: 20, price: 4.5, multiplier: 100, marketValue: 9000, volatility: 0.32, beta: -0.2, delta: 0.4 },
   { id: "tlt-put", symbol: "TLT P80", type: "Bond Option", quantity: 25, price: 3.2, multiplier: 100, marketValue: 8000, volatility: 0.35, beta: -0.2, delta: -0.32 },
   { id: "ief-put", symbol: "IEF P90", type: "Bond Option", quantity: 20, price: 2.4, multiplier: 100, marketValue: 4800, volatility: 0.2, beta: -0.12, delta: -0.25 },
-];
+].map((position) => ({ ...position, riskSource: "historical-pending" }));
 
 export function enrichPositionsWithHistoricalRisk(
   positions: Position[],
