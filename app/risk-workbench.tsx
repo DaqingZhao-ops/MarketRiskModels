@@ -66,6 +66,24 @@ type PortfolioVersion = {
   positions: Position[];
 };
 
+type MarketBriefing = {
+  source: string;
+  fetchedAt: string;
+  indicators: Array<{
+    label: string;
+    symbol: string;
+    value: number;
+    change: number;
+    percentChange: number;
+    unit: "index" | "percent";
+    marketState: string;
+    asOf: string;
+  }>;
+  headlines: Array<{ title: string; url: string; publishedAt: string }>;
+  warnings: string[];
+  disclosures: string[];
+};
+
 type SortField =
   | "account"
   | "symbol"
@@ -199,6 +217,8 @@ export function RiskWorkbench() {
   const [importBusy, setImportBusy] = useState(false);
   const [importInputKey, setImportInputKey] = useState(0);
   const [history, setHistory] = useState<HistoricalData>();
+  const [marketBriefing, setMarketBriefing] = useState<MarketBriefing>();
+  const [marketBriefingError, setMarketBriefingError] = useState("");
   const [historyStatus, setHistoryStatus] = useState("Loading market history…");
   const [remoteResult, setRemoteResult] = useState<RiskResult>();
   const [engineStatus, setEngineStatus] = useState("Connecting to Python engine…");
@@ -219,6 +239,23 @@ export function RiskWorkbench() {
   useEffect(() => {
     positionsRef.current = positions;
   }, [positions]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetch(apiUrl("/api/market/briefing"), { signal: controller.signal })
+      .then(async (response) => {
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.detail ?? "Market briefing is unavailable.");
+        setMarketBriefing(payload as MarketBriefing);
+        setMarketBriefingError("");
+      })
+      .catch((error) => {
+        if (!controller.signal.aborted) {
+          setMarketBriefingError(error instanceof Error ? error.message : "Market briefing is unavailable.");
+        }
+      });
+    return () => controller.abort();
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -702,6 +739,51 @@ export function RiskWorkbench() {
         </nav>
         <div className="status"><i /> {engineStatus}</div>
       </header>
+
+      <section className="market-briefing" aria-label="Live market briefing">
+        <div className="market-indicators">
+          {marketBriefing?.indicators.length ? marketBriefing.indicators.map((indicator) => (
+            <article key={indicator.symbol}>
+              <span>{indicator.label}</span>
+              <strong>
+                {indicator.unit === "percent"
+                  ? `${indicator.value.toFixed(3)}%`
+                  : indicator.value.toLocaleString("en-US", { maximumFractionDigits: 2 })}
+              </strong>
+              <small className={indicator.change >= 0 ? "market-up" : "market-down"}>
+                {indicator.change >= 0 ? "+" : ""}
+                {indicator.unit === "percent"
+                  ? `${indicator.change.toFixed(3)} pts`
+                  : `${indicator.change.toFixed(2)} (${percent.format(indicator.percentChange)})`}
+              </small>
+              <em>{indicator.marketState.toLowerCase()} · {new Date(indicator.asOf).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</em>
+            </article>
+          )) : (
+            <p className="market-loading">{marketBriefingError || "Loading live market indicators…"}</p>
+          )}
+        </div>
+        <div className="market-headlines">
+          <header>
+            <span>Yahoo Finance headlines</span>
+            <small>{marketBriefing ? `Updated ${new Date(marketBriefing.fetchedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : "Loading…"}</small>
+          </header>
+          {marketBriefing?.headlines.length ? (
+            <ol>
+              {marketBriefing.headlines.slice(0, 5).map((headline) => (
+                <li key={headline.url}>
+                  <a href={headline.url} target="_blank" rel="noreferrer">{headline.title}</a>
+                </li>
+              ))}
+            </ol>
+          ) : <p>{marketBriefingError || "Loading five current headlines…"}</p>}
+          {marketBriefing?.warnings.length ? (
+            <small className="market-feed-warning">{marketBriefing.warnings.join(" ")}</small>
+          ) : null}
+        </div>
+        <p className="market-disclosure">
+          {marketBriefing?.disclosures.join(" ") ?? "Quotes may be delayed. The money-market reading uses the 13-week Treasury-bill yield as a proxy."}
+        </p>
+      </section>
 
       <section className="hero" id="top">
         <div>

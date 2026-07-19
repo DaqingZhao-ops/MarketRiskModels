@@ -7,6 +7,38 @@ from market_risk import desktop_api
 from market_risk.models import RiskRun
 
 
+def test_parses_market_briefing_quotes_and_headlines() -> None:
+    quote = desktop_api.parse_market_indicator(
+        "S&P 500",
+        "^GSPC",
+        "index",
+        {
+            "chart": {
+                "result": [{
+                    "meta": {
+                        "regularMarketPrice": 6500,
+                        "chartPreviousClose": 6450,
+                        "regularMarketTime": 1784480400,
+                        "marketState": "REGULAR",
+                    },
+                }],
+            },
+        },
+    )
+    assert quote["change"] == 50
+    assert quote["percentChange"] == 50 / 6450
+    assert quote["marketState"] == "REGULAR"
+
+    headlines = desktop_api.parse_yahoo_headlines("""
+        <rss><channel>
+          <item><title>Markets &amp; rates</title><link>https://example.com/one</link><pubDate>Today</pubDate></item>
+          <item><title>Second story</title><link>https://example.com/two</link></item>
+        </channel></rss>
+    """)
+    assert headlines[0]["title"] == "Markets & rates"
+    assert len(headlines) == 2
+
+
 def test_health_and_parametric_risk_are_audited() -> None:
     request = {
         "positions": [

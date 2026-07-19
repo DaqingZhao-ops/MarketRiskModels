@@ -1,8 +1,11 @@
 import asyncio
+import html
 import math
 import re
+import xml.etree.ElementTree as ElementTree
 from datetime import datetime, timezone
 from typing import Annotated, Any
+from urllib.parse import quote
 from uuid import uuid4
 
 import httpx
@@ -26,6 +29,95 @@ class PortfolioPayload(BaseModel):
     positions: list[dict[str, Any]] = Field(min_length=1)
     previousPositions: list[dict[str, Any]] | None = None
     sourceName: str | None = None
+
+
+MARKET_INDICATORS = [
+    ("S&P 500", "^GSPC", "index"),
+    ("Dow", "^DJI", "index"),
+    ("10Y Treasury", "^TNX", "percent"),
+    ("Money market proxy", "^IRX", "percent"),
+]
+
+
+def parse_market_indicator(
+    label: str,
+    symbol: str,
+    unit: str,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    result = payload["chart"]["result"][0]
+    meta = result["meta"]
+    price = float(meta["regularMarketPrice"])
+    previous = float(meta.get("chartPreviousClose") or meta.get("previousClose") or price)
+    change = price - previous
+    return {
+        "label": label,
+        "symbol": symbol,
+        "value": price,
+        "change": change,
+        "percentChange": change / previous if previous else 0,
+        "unit": unit,
+        "marketState": meta.get("marketState", "DELAYED"),
+        "asOf": datetime.fromtimestamp(
+            int(meta.get("regularMarketTime") or datetime.now(timezone.utc).timestamp()),
+            timezone.utc,
+        ).isoformat(),
+    }
+
+
+def parse_yahoo_headlines(xml: str) -> list[dict[str, str]]:
+    root = ElementTree.fromstring(xml)
+    headlines = []
+    for item in root.findall(".//item")[:5]:
+        title = html.unescape((item.findtext("title") or "").strip())
+        link = (item.findtext("link") or "").strip()
+        published = (item.findtext("pubDate") or "").strip()
+        if title and link:
+            headlines.append({"title": title, "url": link, "publishedAt": published})
+    return headlines
+
+
+@router.get("/market/briefing")
+async def market_briefing() -> dict[str, Any]:
+    warnings = []
+    headers = {"User-Agent": "Mozilla/5.0 MarketRiskModels/0.2"}
+    async with httpx.AsyncClient(timeout=15, headers=headers, follow_redirects=True) as client:
+        async def fetch_indicator(label: str, symbol: str, unit: str) -> dict[str, Any] | None:
+            try:
+                response = await client.get(
+                    f"https://query1.finance.yahoo.com/v8/finance/chart/{quote(symbol, safe='')}",
+                    params={"interval": "1m", "range": "1d"},
+                )
+                response.raise_for_status()
+                return parse_market_indicator(label, symbol, unit, response.json())
+            except Exception as error:
+                warnings.append(f"{label} unavailable: {error}")
+                return None
+
+        indicators = await asyncio.gather(*(
+            fetch_indicator(label, symbol, unit)
+            for label, symbol, unit in MARKET_INDICATORS
+        ))
+        try:
+            news_response = await client.get("https://finance.yahoo.com/news/rssindex")
+            news_response.raise_for_status()
+            headlines = parse_yahoo_headlines(news_response.text)
+            if len(headlines) < 5:
+                warnings.append(f"Yahoo Finance returned only {len(headlines)} headlines.")
+        except Exception as error:
+            headlines = []
+            warnings.append(f"Yahoo Finance headlines unavailable: {error}")
+    return {
+        "source": "Yahoo Finance",
+        "fetchedAt": datetime.now(timezone.utc).isoformat(),
+        "indicators": [indicator for indicator in indicators if indicator],
+        "headlines": headlines,
+        "warnings": warnings,
+        "disclosures": [
+            "Quotes may be delayed and are for situational awareness, not trade execution.",
+            "^IRX is the 13-week Treasury-bill yield used as a money-market-rate proxy.",
+        ],
+    }
 
 
 def serialize_portfolio(version: PortfolioVersion) -> dict[str, Any]:

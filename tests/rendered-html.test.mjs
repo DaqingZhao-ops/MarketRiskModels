@@ -32,6 +32,9 @@ test("server-renders the market risk workbench", async () => {
   assert.match(html, /<title>Market Risk Models<\/title>/i);
   assert.match(html, /See the loss before/);
   assert.match(html, /Historical simulation/);
+  assert.match(html, /Live market briefing/);
+  assert.match(html, /Yahoo Finance headlines/);
+  assert.match(html, /13-week Treasury-bill yield/);
   assert.match(html, /Expected shortfall/);
   assert.match(html, /Loss distribution legend/);
   assert.match(html, /Tail observations/);
