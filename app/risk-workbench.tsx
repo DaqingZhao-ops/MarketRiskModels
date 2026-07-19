@@ -194,7 +194,7 @@ export function RiskWorkbench() {
   const [message, setMessage] = useState("Default portfolio loaded; calculating risk factors from history.");
   const [importStatus, setImportStatus] = useState("");
   const [selectedImportFile, setSelectedImportFile] = useState<File>();
-  const [importMode, setImportMode] = useState<"append" | "replace">("append");
+  const [importBusy, setImportBusy] = useState(false);
   const [importInputKey, setImportInputKey] = useState(0);
   const [history, setHistory] = useState<HistoricalData>();
   const [historyStatus, setHistoryStatus] = useState("Loading market history…");
@@ -575,23 +575,24 @@ export function RiskWorkbench() {
     const file = event.target.files?.[0];
     setSelectedImportFile(file);
     if (file) {
-      setImportStatus(`${file.name} selected. Import starting automatically…`);
-      void importFile(file);
+      setImportStatus(`${file.name} selected. Choose Append or Replace.`);
     } else {
       setImportStatus("No file was selected.");
     }
   }
 
-  async function importCsv() {
+  async function importCsv(mode: "append" | "replace") {
     const file = selectedImportFile;
     if (!file) {
       setImportStatus("Choose a Schwab, Fidelity, or app CSV file first.");
       return;
     }
-    await importFile(file);
+    await importFile(file, mode);
   }
 
-  async function importFile(file: File) {
+  async function importFile(file: File, mode: "append" | "replace") {
+    if (importBusy) return;
+    setImportBusy(true);
     setImportStatus(`Reading ${file.name}…`);
     let parsed: Position[];
     try {
@@ -605,26 +606,27 @@ export function RiskWorkbench() {
       const failure = error instanceof Error ? error.message : "Unable to import CSV.";
       setImportStatus(`Import failed: ${failure}`);
       setMessage(failure);
+      setImportBusy(false);
       return;
     }
 
-    const nextPositions = importMode === "append" ? [...positions, ...parsed] : parsed;
+    const nextPositions = mode === "append" ? [...positions, ...parsed] : parsed;
     setPositions(nextPositions);
     setManualPositionOrder(false);
     setPositionSort(undefined);
-    setImportStatus(`${importMode === "append" ? "Appending" : "Imported"} ${parsed.length} positions. Saving the aggregate as the new default…`);
+    setImportStatus(`${mode === "append" ? "Appending" : "Imported"} ${parsed.length} positions. Saving a new combined position source…`);
     try {
       const savedDefault = await saveDefault(
         nextPositions,
         positions,
-        importMode === "append" ? `Aggregate + ${file.name}` : file.name,
+        mode === "append" ? `Combined portfolio through ${file.name}` : file.name,
       );
       if (savedDefault) setSelectedVersionId(savedDefault.id);
       setPortfolioSaveStatus(
         `Imported default saved ${savedDefault ? new Date(savedDefault.createdAt).toLocaleString() : ""}.`,
       );
       const accountCount = new Set(nextPositions.map((position) => position.account ?? "Unassigned")).size;
-      const confirmation = `${parsed.length} positions ${importMode === "append" ? "appended" : "imported"} from ${file.name}; ${nextPositions.length} positions across ${accountCount} accounts are now analyzed in aggregate. Missing risk factors will be calculated from history.`;
+      const confirmation = `${parsed.length} positions ${mode === "append" ? "appended" : "imported"} from ${file.name}. A new combined source now contains ${nextPositions.length} positions across ${accountCount} accounts.`;
       setImportStatus(confirmation);
       setMessage(confirmation);
     } catch (error) {
@@ -636,6 +638,7 @@ export function RiskWorkbench() {
     }
     setSelectedImportFile(undefined);
     setImportInputKey((current) => current + 1);
+    setImportBusy(false);
   }
 
   return (
@@ -712,14 +715,6 @@ export function RiskWorkbench() {
         </div>
         <div className="import-control">
           <label htmlFor="position-file">Position source CSV</label>
-          <select
-            aria-label="Portfolio import mode"
-            value={importMode}
-            onChange={(event) => setImportMode(event.target.value as "append" | "replace")}
-          >
-            <option value="append">Append as another account</option>
-            <option value="replace">Replace aggregate portfolio</option>
-          </select>
           <input
             key={importInputKey}
             id="position-file"
@@ -727,10 +722,20 @@ export function RiskWorkbench() {
             accept=".csv,text/csv"
             onChange={selectImportFile}
           />
-          <button type="button" onClick={importCsv}>
-            {selectedImportFile
-              ? `${importMode === "append" ? "Append" : "Replace with"} selected file`
-              : "Import selected file"}
+          <button
+            type="button"
+            disabled={!selectedImportFile || importBusy}
+            onClick={() => void importCsv("append")}
+          >
+            {importBusy ? "Merging…" : "Append selected file"}
+          </button>
+          <button
+            type="button"
+            className="secondary"
+            disabled={!selectedImportFile || importBusy}
+            onClick={() => void importCsv("replace")}
+          >
+            Replace portfolio
           </button>
         </div>
       </section>

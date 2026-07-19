@@ -119,10 +119,11 @@ h1 {
 }
 .import-control {
   display: grid;
-  grid-template-columns: minmax(180px, 1fr) auto;
+  grid-template-columns: minmax(180px, 1fr) auto auto;
   gap: 7px;
   align-items: end;
 }
+.import-control button:disabled { opacity: .5; cursor: not-allowed; }
 .import-control label { grid-column: 1 / -1; }
 .import-control input {
   min-width: 0;
