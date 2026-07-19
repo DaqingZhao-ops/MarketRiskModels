@@ -51,7 +51,6 @@ const emptyPositionDraft = {
   type: "Stock",
   quantity: "",
   price: "",
-  multiplier: "1",
   volatility: "",
   beta: "",
   delta: "",
@@ -92,7 +91,6 @@ type SortField =
   | "quantity"
   | "price"
   | "marketPrice"
-  | "multiplier"
   | "marketValue"
   | "volatility"
   | "beta"
@@ -510,6 +508,20 @@ export function RiskWorkbench() {
     },
     [manualPositionOrder, positionSort, positions],
   );
+  const positionTrends = useMemo(() => {
+    const trends = new Map<string, number[]>();
+    for (const series of history?.series ?? []) {
+      const latestDate = series.dates.at(-1);
+      if (!latestDate) continue;
+      const cutoff = new Date(latestDate).getTime() - 30 * 24 * 60 * 60 * 1000;
+      const values = series.adjustedClose.filter((_, index) => {
+        const time = new Date(series.dates[index]).getTime();
+        return Number.isFinite(time) && time >= cutoff;
+      });
+      trends.set(series.symbol.toUpperCase(), values);
+    }
+    return trends;
+  }, [history]);
 
   function togglePositionSort(field: SortField) {
     setPositionSort((current) => current?.field === field
@@ -607,7 +619,7 @@ export function RiskWorkbench() {
     const symbol = positionDraft.symbol.trim().toUpperCase();
     const quantity = Number(positionDraft.quantity);
     const price = Number(positionDraft.price);
-    const multiplier = Number(positionDraft.multiplier) || 1;
+    const multiplier = positionDraft.type.endsWith("Option") ? 100 : 1;
     if (!symbol || !Number.isFinite(quantity) || quantity === 0 ||
         !Number.isFinite(price) || price < 0) {
       setMessage("Enter a symbol, non-zero quantity, and valid unit price before adding.");
@@ -1287,7 +1299,7 @@ export function RiskWorkbench() {
                 <th aria-sort={positionSort?.field === "quantity" ? `${positionSort.direction}ending` : "none"}>{sortLabel("Quantity", "quantity")}</th>
                 <th aria-sort={positionSort?.field === "price" ? `${positionSort.direction}ending` : "none"}>{sortLabel("Unit price", "price")}</th>
                 <th aria-sort={positionSort?.field === "marketPrice" ? `${positionSort.direction}ending` : "none"}>{sortLabel("Market price", "marketPrice")}</th>
-                <th aria-sort={positionSort?.field === "multiplier" ? `${positionSort.direction}ending` : "none"}>{sortLabel("Multiplier", "multiplier")}</th>
+                <th>30D range</th>
                 <th aria-sort={positionSort?.field === "marketValue" ? `${positionSort.direction}ending` : "none"}>{sortLabel("Market value", "marketValue")}</th>
                 <th aria-sort={positionSort?.field === "volatility" ? `${positionSort.direction}ending` : "none"}>{sortLabel("Annual vol.", "volatility")}</th>
                 <th aria-sort={positionSort?.field === "beta" ? `${positionSort.direction}ending` : "none"}>{sortLabel("Beta", "beta")}</th>
@@ -1309,10 +1321,10 @@ export function RiskWorkbench() {
                 <td><input aria-label="New position quantity" placeholder="0" type="number" value={positionDraft.quantity} onChange={(event) => setPositionDraft({ ...positionDraft, quantity: event.target.value })} /></td>
                 <td><input aria-label="New position unit price" placeholder="0.00" type="number" min="0" step="0.01" value={positionDraft.price} onChange={(event) => setPositionDraft({ ...positionDraft, price: event.target.value })} /></td>
                 <td><span className="market-quote market-quote-empty">After add</span></td>
-                <td><input aria-label="New position multiplier" type="number" min="0" step="1" value={positionDraft.multiplier} onChange={(event) => setPositionDraft({ ...positionDraft, multiplier: event.target.value })} /></td>
+                <td className="position-trend"><span className="market-sparkline-empty">After add</span></td>
                 <td><input aria-label="New position market value" type="number" readOnly value={
                   positionDraft.quantity && positionDraft.price
-                    ? Math.abs(Number(positionDraft.quantity) * Number(positionDraft.price) * (Number(positionDraft.multiplier) || 1))
+                    ? Math.abs(Number(positionDraft.quantity) * Number(positionDraft.price) * (positionDraft.type.endsWith("Option") ? 100 : 1))
                     : ""
                 } /></td>
                 <td><input aria-label="New position volatility" placeholder="Auto" type="number" min="0" step="0.01" value={positionDraft.volatility} onChange={(event) => setPositionDraft({ ...positionDraft, volatility: event.target.value })} /></td>
@@ -1381,7 +1393,9 @@ export function RiskWorkbench() {
                       <span className="market-quote market-quote-empty">Unavailable</span>
                     )}
                   </td>
-                  <td><input aria-label={`${position.symbol} multiplier`} type="number" min="0" step="1" value={position.multiplier} onChange={(e) => updatePosition(position.id, "multiplier", e.target.value)} /></td>
+                  <td className="position-trend">
+                    <MarketSparkline values={positionTrends.get(position.symbol.toUpperCase()) ?? []} />
+                  </td>
                   <td><input aria-label={`${position.symbol} market value`} type="number" value={position.marketValue} readOnly /></td>
                   <td><input aria-label={`${position.symbol} volatility`} type="number" min="0" step="0.01" value={position.volatility} onChange={(e) => updatePosition(position.id, "volatility", e.target.value)} /></td>
                   <td><input aria-label={`${position.symbol} beta`} type="number" step="0.1" value={position.beta} onChange={(e) => updatePosition(position.id, "beta", e.target.value)} /></td>
@@ -1416,7 +1430,9 @@ export function RiskWorkbench() {
           {" "}
           CSV columns: symbol, type, quantity, price, multiplier, marketValue,
           volatility, beta, delta. Market value is quantity × unit price ×
-          multiplier; option contracts use 100. Sample prices and option
+          multiplier. Multipliers are retained internally and option contracts
+          entered manually use 100. The 30D range curves use adjusted closing
+          prices from the historical-data feed. Sample prices and option
           premiums remain illustrative when no exact tradable identifier is available.
           Stock, ETF, and mutual-fund prices refresh from the latest market feed.
           Stock and ETF options without quotes use a labeled Black–Scholes fallback;
