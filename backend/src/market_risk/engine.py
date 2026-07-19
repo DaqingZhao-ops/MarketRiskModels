@@ -10,6 +10,11 @@ MONTE_CARLO_SCENARIOS = 10_000
 ENGINE_VERSION = "0.2.0"
 
 
+def _directional_exposure(position: Position) -> float:
+    quantity_direction = -1.0 if position.quantity < 0 else 1.0
+    return quantity_direction * position.market_value * position.delta
+
+
 def _correlation(left: Position, right: Position) -> float:
     if left.id == right.id:
         return 1.0
@@ -35,7 +40,7 @@ def _correlation_matrix(positions: Sequence[Position]) -> np.ndarray:
 def _daily_volatility(positions: Sequence[Position]) -> float:
     exposures = np.array(
         [
-            position.market_value * position.delta * position.volatility / np.sqrt(TRADING_DAYS)
+            _directional_exposure(position) * position.volatility / np.sqrt(TRADING_DAYS)
             for position in positions
         ],
     )
@@ -50,8 +55,7 @@ def _monte_carlo_losses(positions: Sequence[Position], horizon: int) -> np.ndarr
     correlated = independent @ cholesky.T
     exposures = np.array(
         [
-            position.market_value
-            * position.delta
+            _directional_exposure(position)
             * position.volatility
             / np.sqrt(TRADING_DAYS)
             * np.sqrt(horizon)
@@ -75,8 +79,7 @@ def _historical_losses(
         start = common_dates[index - horizon]
         end = common_dates[index]
         pnl = sum(
-            position.market_value
-            * position.delta
+            _directional_exposure(position)
             * (prices[position.symbol][end] / prices[position.symbol][start] - 1)
             for position in positions
         )
@@ -189,4 +192,3 @@ def calculate_risk(
         history_start=history_dates[0] if history_dates else None,
         history_end=history_dates[-1] if history_dates else None,
     )
-

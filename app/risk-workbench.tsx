@@ -288,6 +288,12 @@ export function RiskWorkbench() {
             updated.quantity * updated.price * updated.multiplier,
           );
         }
+        if (field === "symbol" || field === "type") {
+          updated.marketPrice = undefined;
+          updated.marketPriceAt = undefined;
+          updated.marketPriceSource = undefined;
+          updated.riskSource = "historical-pending";
+        }
         if (field === "volatility" || field === "beta" || field === "delta") {
           updated.riskSource = "provided";
         }

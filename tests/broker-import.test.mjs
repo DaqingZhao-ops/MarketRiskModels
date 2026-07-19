@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   calculateEfficientFrontier,
+  calculateRisk,
   enrichPositionsWithHistoricalRisk,
   parsePositionsCsv,
 } from "../lib/risk.ts";
@@ -213,4 +214,75 @@ test("builds an efficient frontier and locates the current portfolio", () => {
   assert.ok(result.recommendations.every((item) => Number.isFinite(item.change)));
   assert.ok(Number.isFinite(result.current.risk));
   assert.ok(Number.isFinite(result.current.return));
+});
+
+test("does not treat the SPY benchmark as an investable frontier asset", () => {
+  const dates = Array.from({ length: 61 }, (_, index) =>
+    new Date(Date.UTC(2025, 0, index + 1)).toISOString().slice(0, 10));
+  const seriesFor = (symbol, phase) => ({
+    symbol,
+    sourceSymbol: symbol,
+    dates,
+    adjustedClose: dates.map((_, index) => 100 * (1 + index * 0.001 + Math.sin(index + phase) * 0.01)),
+  });
+  const positions = [
+    { id: "a", symbol: "AAA", type: "Stock", quantity: 10, price: 100, multiplier: 1, marketValue: 1000, volatility: 0.2, beta: 1, delta: 1 },
+    { id: "b", symbol: "BBB", type: "Stock", quantity: 10, price: 100, multiplier: 1, marketValue: 1000, volatility: 0.2, beta: 1, delta: 1 },
+  ];
+  const result = calculateEfficientFrontier(positions, {
+    source: "test",
+    fetchedAt: "2026-01-01",
+    mappings: { AAA: "AAA", BBB: "BBB", SPY: "SPY" },
+    series: [seriesFor("AAA", 0), seriesFor("BBB", 1), seriesFor("SPY", 2)],
+  });
+  assert.ok(result);
+  assert.equal(result.assetCount, 2);
+  assert.ok(result.recommendations.every((item) => item.symbol !== "SPY"));
+});
+
+test("negative quantities reverse directional risk exposure", () => {
+  const base = {
+    type: "Stock",
+    price: 100,
+    multiplier: 1,
+    marketValue: 1000,
+    volatility: 0.2,
+    beta: 1,
+    delta: 1,
+  };
+  const long = { ...base, id: "long", symbol: "LONG", quantity: 10 };
+  const hedge = { ...base, id: "short", symbol: "SHORT", quantity: -10 };
+  const unhedged = calculateRisk([long], "parametric", 0.99, 1);
+  const hedged = calculateRisk([long, hedge], "parametric", 0.99, 1);
+  assert.ok(unhedged.dailyVolatility > 0);
+  assert.ok(hedged.dailyVolatility < unhedged.dailyVolatility);
+});
+
+test("retries fallback risk factors when history later becomes available", () => {
+  const dates = Array.from({ length: 61 }, (_, index) =>
+    new Date(Date.UTC(2025, 0, index + 1)).toISOString().slice(0, 10));
+  const prices = dates.map((_, index) => 100 * (1 + index * 0.001 + Math.sin(index) * 0.01));
+  const position = {
+    id: "retry",
+    symbol: "AAA",
+    type: "Stock",
+    quantity: 10,
+    price: 100,
+    multiplier: 1,
+    marketValue: 1000,
+    volatility: 0.25,
+    beta: 1,
+    delta: 1,
+    riskSource: "fallback",
+  };
+  const [enriched] = enrichPositionsWithHistoricalRisk([position], {
+    source: "test",
+    fetchedAt: "2026-01-01",
+    mappings: { AAA: "AAA", SPY: "SPY" },
+    series: [
+      { symbol: "AAA", sourceSymbol: "AAA", dates, adjustedClose: prices },
+      { symbol: "SPY", sourceSymbol: "SPY", dates, adjustedClose: prices.map((price) => price * 5) },
+    ],
+  });
+  assert.equal(enriched.riskSource, "historical");
 });

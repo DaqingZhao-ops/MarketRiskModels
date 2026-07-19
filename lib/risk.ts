@@ -115,7 +115,7 @@ export function enrichPositionsWithHistoricalRisk(
 ) {
   const benchmark = history.series.find((item) => item.symbol === "SPY");
   return positions.map((position) => {
-    if (position.riskSource !== "historical-pending") return position;
+    if (!["historical-pending", "fallback"].includes(position.riskSource ?? "")) return position;
     const series = history.series.find((item) => item.symbol === position.symbol);
     if (!series || series.adjustedClose.length < 30) {
       return { ...position, riskSource: "fallback" as const };
@@ -268,9 +268,16 @@ export function calculateEfficientFrontier(
   history?: HistoricalData,
 ): EfficientFrontierResult | undefined {
   if (!history) return undefined;
+  const heldSources = new Set(
+    positions
+      .map((position) => history.mappings[position.symbol])
+      .filter((source): source is string => Boolean(source)),
+  );
   const uniqueSeries = [...new Map(
     history.series
-      .filter((series) => series.adjustedClose.length >= 60)
+      .filter((series) =>
+        heldSources.has(series.sourceSymbol) &&
+        series.adjustedClose.length >= 60)
       .map((series) => [series.sourceSymbol, series]),
   ).values()];
   if (uniqueSeries.length < 2) return undefined;
@@ -352,7 +359,7 @@ export function calculateEfficientFrontier(
     if (index === undefined) {
       excluded.push(position.symbol);
     } else {
-      currentWeights[index] += position.marketValue * position.delta / totalMarketValue;
+      currentWeights[index] += directionalExposure(position) / totalMarketValue;
     }
   }
   const currentPoint = pointFor(currentWeights);
@@ -438,12 +445,17 @@ function correlation(left: Position, right: Position) {
   return Math.max(-0.65, Math.min(0.82, systematic + sameClass));
 }
 
+function directionalExposure(position: Position) {
+  const quantityDirection = position.quantity < 0 ? -1 : 1;
+  return quantityDirection * position.marketValue * position.delta;
+}
+
 function portfolioDailyVolatility(positions: Position[]) {
   let variance = 0;
   for (const left of positions) {
     for (const right of positions) {
-      const leftExposure = left.marketValue * left.delta * left.volatility / Math.sqrt(252);
-      const rightExposure = right.marketValue * right.delta * right.volatility / Math.sqrt(252);
+      const leftExposure = directionalExposure(left) * left.volatility / Math.sqrt(252);
+      const rightExposure = directionalExposure(right) * right.volatility / Math.sqrt(252);
       variance += leftExposure * rightExposure * correlation(left, right);
     }
   }
@@ -461,7 +473,7 @@ function scenarioLosses(positions: Position[], count: number, heavyTails: boolea
       let shock = position.beta * marketShock * 0.62 + idiosyncraticShock * Math.sqrt(Math.max(0.08, 1 - Math.min(0.92, position.beta ** 2 * 0.38)));
       if (heavyTails && scenario % 47 === 0) shock *= 1.8;
       const dailyMove = shock * position.volatility / Math.sqrt(252);
-      pnl += position.marketValue * position.delta * dailyMove;
+      pnl += directionalExposure(position) * dailyMove;
     }
     losses.push(-pnl);
   }
@@ -501,7 +513,7 @@ function historicalLosses(positions: Position[], history: HistoricalData, horizo
         break;
       }
       const underlyingReturn = endPrice / startPrice - 1;
-      pnl += position.marketValue * position.delta * underlyingReturn;
+      pnl += directionalExposure(position) * underlyingReturn;
     }
     if (valid) {
       losses.push(-pnl);
