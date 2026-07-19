@@ -164,6 +164,15 @@ h2 { margin: 0; font-size: 25px; letter-spacing: -.035em; }
 .frontier-chart .frontier-axis-label { fill: var(--ink); }
 .frontier-summary { display: flex; flex-wrap: wrap; gap: 10px 28px; margin: 0 27px; padding: 16px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); color: var(--muted); font-size: 11px; }
 .frontier-summary b { margin-right: 5px; color: var(--ink); font-size: 14px; }
+.frontier-candidates { display: grid; grid-template-columns: minmax(180px, .55fr) 1.45fr; gap: 28px; margin: 0 27px; padding: 22px 0 8px; }
+.frontier-candidates h3 { margin: 7px 0 0; font-size: 18px; }
+.frontier-candidates ol { margin: 0; padding: 0; list-style: none; }
+.frontier-candidates li { display: grid; grid-template-columns: 80px 68px 1fr; align-items: center; gap: 12px; padding: 9px 0; border-top: 1px solid var(--line); }
+.frontier-candidates strong { font-size: 11px; }
+.frontier-candidates li > span { padding: 4px 6px; text-align: center; font: 9px var(--font-geist-mono); }
+.candidate-increase { background: #dcece3; color: #285f48; }
+.candidate-reduce { background: #f3dfda; color: #884c3e; }
+.frontier-candidates small { color: var(--muted); font-size: 10px; }
 .frontier-note, .frontier-loading { margin: 0; padding: 16px 27px 23px; color: var(--muted); font-size: 10px; line-height: 1.55; }
 .frontier-loading { min-height: 180px; }
 
@@ -217,6 +226,9 @@ footer small { grid-column: 2; }
   .control-wide { grid-column: auto; }
   .metrics { padding-left: 14px; padding-right: 14px; grid-template-columns: 1fr; }
   .analysis-grid { padding-left: 14px; padding-right: 14px; }
+  .frontier { margin-left: 14px; margin-right: 14px; }
+  .frontier-candidates { grid-template-columns: 1fr; }
+  .frontier-candidates li { grid-template-columns: 70px 64px 1fr; }
   .positions { margin-left: 14px; margin-right: 14px; }
   .methodology { padding: 55px 24px; }
   .methodology > div { grid-template-columns: 1fr; }

@@ -105,6 +105,8 @@ test("builds an efficient frontier and locates the current portfolio", () => {
   assert.equal(result.observations, 90);
   assert.ok(result.cloud.length > 100);
   assert.ok(result.frontier.length > 1);
+  assert.equal(result.recommendations.length, 3);
+  assert.ok(result.recommendations.every((item) => Number.isFinite(item.change)));
   assert.ok(Number.isFinite(result.current.risk));
   assert.ok(Number.isFinite(result.current.return));
 });

@@ -446,9 +446,31 @@ export function RiskWorkbench() {
               <span><b>{frontier.current.sharpe.toFixed(2)}</b> Sharpe ratio</span>
               <span>{frontier.observations.toLocaleString()} overlapping daily returns</span>
             </div>
+            <div className="frontier-candidates">
+              <div>
+                <p className="eyebrow">Largest model allocation gaps</p>
+                <h3>Top 5 rebalancing candidates</h3>
+              </div>
+              <ol>
+                {frontier.recommendations.map((candidate) => (
+                  <li key={candidate.symbol}>
+                    <strong>{candidate.symbol}</strong>
+                    <span className={candidate.action === "Increase" ? "candidate-increase" : "candidate-reduce"}>
+                      {candidate.action}
+                    </span>
+                    <small>
+                      {percent.format(candidate.currentWeight)} current →{" "}
+                      {percent.format(candidate.targetWeight)} model target
+                    </small>
+                  </li>
+                ))}
+              </ol>
+            </div>
             <p className="frontier-note">
               Long-only simulated portfolios form the opportunity set and upper frontier.
               The current portfolio dot uses position market values and delta-adjusted option exposure.
+              Rebalancing candidates are the largest exposure gaps versus the simulated
+              maximum-Sharpe portfolio, not investment recommendations.
               {frontier.excluded.length
                 ? ` Excluded for insufficient history: ${frontier.excluded.join(", ")}.`
                 : ""}

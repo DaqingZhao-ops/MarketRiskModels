@@ -59,6 +59,13 @@ export type EfficientFrontierResult = {
   assetCount: number;
   observations: number;
   excluded: string[];
+  recommendations: Array<{
+    symbol: string;
+    action: "Increase" | "Reduce";
+    currentWeight: number;
+    targetWeight: number;
+    change: number;
+  }>;
 };
 
 export const DEFAULT_POSITIONS: Position[] = [
@@ -218,13 +225,29 @@ export function calculateEfficientFrontier(
 
   const random = mulberry32(20260719 + uniqueSeries.length * 17);
   const portfolios: FrontierPoint[] = [];
+  let maxSharpeWeights = uniqueSeries.map(() => 1 / uniqueSeries.length);
+  let maxSharpe = -Infinity;
   for (let iteration = 0; iteration < 5000; iteration += 1) {
     const raw = uniqueSeries.map(() => -Math.log(Math.max(random(), Number.EPSILON)));
     const total = raw.reduce((sum, value) => sum + value, 0);
-    portfolios.push(pointFor(raw.map((value) => value / total)));
+    const weights = raw.map((value) => value / total);
+    const point = pointFor(weights);
+    portfolios.push(point);
+    const sharpe = point.risk > 0 ? (point.return - 0.043) / point.risk : -Infinity;
+    if (sharpe > maxSharpe) {
+      maxSharpe = sharpe;
+      maxSharpeWeights = weights;
+    }
   }
   uniqueSeries.forEach((_, index) => {
-    portfolios.push(pointFor(uniqueSeries.map((__, assetIndex) => assetIndex === index ? 1 : 0)));
+    const weights = uniqueSeries.map((__, assetIndex) => assetIndex === index ? 1 : 0);
+    const point = pointFor(weights);
+    portfolios.push(point);
+    const sharpe = point.risk > 0 ? (point.return - 0.043) / point.risk : -Infinity;
+    if (sharpe > maxSharpe) {
+      maxSharpe = sharpe;
+      maxSharpeWeights = weights;
+    }
   });
   const sorted = [...portfolios].sort((left, right) => left.risk - right.risk || right.return - left.return);
   const frontier: FrontierPoint[] = [];
@@ -251,6 +274,19 @@ export function calculateEfficientFrontier(
   }
   const currentPoint = pointFor(currentWeights);
   const riskFreeRate = 0.043;
+  const recommendations = uniqueSeries
+    .map((series, index) => {
+      const change = maxSharpeWeights[index] - currentWeights[index];
+      return {
+        symbol: series.sourceSymbol,
+        action: (change >= 0 ? "Increase" : "Reduce") as "Increase" | "Reduce",
+        currentWeight: currentWeights[index],
+        targetWeight: maxSharpeWeights[index],
+        change,
+      };
+    })
+    .sort((left, right) => Math.abs(right.change) - Math.abs(left.change))
+    .slice(0, 5);
   return {
     cloud: portfolios.filter((_, index) => index % 14 === 0).slice(0, 400),
     frontier,
@@ -261,6 +297,7 @@ export function calculateEfficientFrontier(
     assetCount: uniqueSeries.length,
     observations: commonDates.length - 1,
     excluded: [...new Set(excluded)],
+    recommendations,
   };
 }
 
