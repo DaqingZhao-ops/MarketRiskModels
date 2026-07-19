@@ -77,6 +77,39 @@ test("calculates missing broker risk factors from historical prices", () => {
   assert.equal(enriched.marketValue, 25000);
 });
 
+test("uses a labeled Black-Scholes fallback for simplified stock options", () => {
+  const dates = Array.from({ length: 61 }, (_, index) =>
+    new Date(Date.UTC(2026, 0, index + 1)).toISOString().slice(0, 10));
+  const adjustedClose = Array.from({ length: 61 }, (_, index) =>
+    220 * (1 + index * 0.0005 + Math.sin(index) * 0.01));
+  const option = {
+    id: "option",
+    symbol: "AAPL C250",
+    type: "Stock Option",
+    quantity: 10,
+    price: 8.5,
+    multiplier: 100,
+    marketValue: 8500,
+    volatility: 0.4,
+    beta: 1,
+    delta: 0.4,
+    riskSource: "historical-pending",
+  };
+  const [enriched] = enrichPositionsWithHistoricalRisk([option], {
+    source: "test",
+    fetchedAt: "2026-03-02T00:00:00Z",
+    mappings: { "AAPL C250": "AAPL", SPY: "SPY" },
+    series: [
+      { symbol: "AAPL C250", sourceSymbol: "AAPL", dates, adjustedClose, latestPrice: 225, latestPriceAt: "2026-03-02T21:00:00Z" },
+      { symbol: "SPY", sourceSymbol: "SPY", dates, adjustedClose: adjustedClose.map((price) => price * 2) },
+    ],
+  }, new Date("2026-03-02T00:00:00Z"));
+  assert.equal(enriched.marketPriceSource, "black-scholes");
+  assert.ok(enriched.marketPrice > 0);
+  assert.equal(enriched.price, enriched.marketPrice);
+  assert.ok(enriched.delta > 0 && enriched.delta < 1);
+});
+
 test("builds an efficient frontier and locates the current portfolio", () => {
   const dates = Array.from({ length: 91 }, (_, index) =>
     new Date(Date.UTC(2025, 0, index + 1)).toISOString().slice(0, 10));

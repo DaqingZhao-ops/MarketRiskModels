@@ -13,6 +13,7 @@ export type Position = {
   delta: number;
   marketPrice?: number;
   marketPriceAt?: string;
+  marketPriceSource?: "market" | "black-scholes";
   riskSource?: "provided" | "historical-pending" | "historical" | "fallback";
 };
 
@@ -118,18 +119,33 @@ export function enrichPositionsWithHistoricalRisk(
     const returns = dailyReturns(series);
     const volatility = historicalDeviation(returns.map((item) => item.value)) * Math.sqrt(252);
     const beta = benchmark ? historicalBeta(series, benchmark) : position.beta;
+    const underlyingPrice = series.latestPrice ?? series.adjustedClose.at(-1) ?? 0;
     const optionDelta = position.type.endsWith("Option")
-      ? blackScholesDelta(position.symbol, series.adjustedClose.at(-1) ?? 0, volatility, asOf)
+      ? blackScholesDelta(position.symbol, underlyingPrice, volatility, asOf)
       : 1;
     const canRefreshPrice = ["Stock", "ETF", "Mutual Fund"].includes(position.type) &&
       typeof series.latestPrice === "number" && Number.isFinite(series.latestPrice) &&
       series.latestPrice > 0;
-    const latestPrice = canRefreshPrice ? series.latestPrice as number : position.price;
+    const modeledOptionPrice = position.type === "Stock Option"
+      ? blackScholesPrice(position.symbol, underlyingPrice, volatility, asOf)
+      : undefined;
+    const hasModeledOptionPrice = typeof modeledOptionPrice === "number" &&
+      Number.isFinite(modeledOptionPrice) && modeledOptionPrice >= 0;
+    const latestPrice = canRefreshPrice
+      ? series.latestPrice as number
+      : hasModeledOptionPrice
+        ? modeledOptionPrice
+        : position.price;
     return {
       ...position,
       price: latestPrice,
-      marketPrice: canRefreshPrice ? latestPrice : undefined,
-      marketPriceAt: canRefreshPrice ? series.latestPriceAt : undefined,
+      marketPrice: canRefreshPrice || hasModeledOptionPrice ? latestPrice : undefined,
+      marketPriceAt: canRefreshPrice || hasModeledOptionPrice ? series.latestPriceAt : undefined,
+      marketPriceSource: canRefreshPrice
+        ? "market"
+        : hasModeledOptionPrice
+          ? "black-scholes"
+          : undefined,
       marketValue: Math.abs(position.quantity * latestPrice * position.multiplier),
       volatility: Number.isFinite(volatility) && volatility > 0 ? volatility : position.volatility,
       beta: Number.isFinite(beta) ? beta : position.beta,
@@ -168,20 +184,51 @@ function historicalBeta(asset: HistoricalSeries, benchmark: HistoricalSeries) {
   return variance > 0 ? covariance / variance : Number.NaN;
 }
 
-function blackScholesDelta(symbol: string, spot: number, volatility: number, asOf: Date) {
+function optionTerms(symbol: string, asOf: Date) {
   const compact = symbol.replace(/^[+-]/, "").replace(/\s/g, "");
-  const match = compact.match(/^[A-Z]{1,6}(\d{6})([CP])(\d{8})$/i);
-  if (!match || spot <= 0 || volatility <= 0) return undefined;
-  const [, date, callPut, strikeDigits] = match;
-  const expiration = new Date(
-    Date.UTC(2000 + Number(date.slice(0, 2)), Number(date.slice(2, 4)) - 1, Number(date.slice(4, 6)), 21),
-  );
-  const years = Math.max((expiration.getTime() - asOf.getTime()) / (365.25 * 86400000), 1 / 365.25);
-  const strike = Number(strikeDigits) / 1000;
+  const occ = compact.match(/^[A-Z]{1,6}(\d{6})([CP])(\d{8})$/i);
+  if (occ) {
+    const [, date, callPut, strikeDigits] = occ;
+    const expiration = new Date(
+      Date.UTC(2000 + Number(date.slice(0, 2)), Number(date.slice(2, 4)) - 1, Number(date.slice(4, 6)), 21),
+    );
+    return {
+      callPut: callPut.toUpperCase(),
+      strike: Number(strikeDigits) / 1000,
+      years: Math.max((expiration.getTime() - asOf.getTime()) / (365.25 * 86400000), 1 / 365.25),
+    };
+  }
+  const simple = symbol.trim().match(/^[A-Z]{1,6}\s+([CP])(\d+(?:\.\d+)?)$/i);
+  if (!simple) return undefined;
+  return { callPut: simple[1].toUpperCase(), strike: Number(simple[2]), years: 90 / 365.25 };
+}
+
+function blackScholesInputs(symbol: string, spot: number, volatility: number, asOf: Date) {
+  const terms = optionTerms(symbol, asOf);
+  if (!terms || spot <= 0 || volatility <= 0 || terms.strike <= 0) return undefined;
+  const { callPut, strike, years } = terms;
   const d1 = (Math.log(spot / strike) + (0.043 + volatility ** 2 / 2) * years) /
     (volatility * Math.sqrt(years));
+  const d2 = d1 - volatility * Math.sqrt(years);
+  return { callPut, strike, years, d1, d2 };
+}
+
+function blackScholesDelta(symbol: string, spot: number, volatility: number, asOf: Date) {
+  const inputs = blackScholesInputs(symbol, spot, volatility, asOf);
+  if (!inputs) return undefined;
+  const { callPut, d1 } = inputs;
   const callDelta = normalCdf(d1);
-  return callPut.toUpperCase() === "P" ? callDelta - 1 : callDelta;
+  return callPut === "P" ? callDelta - 1 : callDelta;
+}
+
+function blackScholesPrice(symbol: string, spot: number, volatility: number, asOf: Date) {
+  const inputs = blackScholesInputs(symbol, spot, volatility, asOf);
+  if (!inputs) return undefined;
+  const { callPut, strike, years, d1, d2 } = inputs;
+  const discountedStrike = strike * Math.exp(-0.043 * years);
+  return callPut === "C"
+    ? spot * normalCdf(d1) - discountedStrike * normalCdf(d2)
+    : discountedStrike * normalCdf(-d2) - spot * normalCdf(-d1);
 }
 
 function normalCdf(value: number) {

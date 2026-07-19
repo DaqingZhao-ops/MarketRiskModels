@@ -185,6 +185,7 @@ td input, td select { width: 100%; min-width: 84px; border: 1px solid transparen
 td input:focus, td select:focus { outline: none; border-color: #88a99b; background: white; }
 .market-quote { display: grid; min-width: 105px; gap: 3px; padding: 7px 8px; background: #e3eee8; color: #285f48; white-space: nowrap; }
 .market-quote strong { font-size: 11px; }
+.market-quote em { color: #3d6657; font: 8px var(--font-geist-mono); font-style: normal; text-transform: uppercase; }
 .market-quote small { color: #567267; font: 8px var(--font-geist-mono); }
 .market-quote-empty { background: #ecece7; color: var(--muted); font: 9px var(--font-geist-mono); }
 .position-draft td { background: #f4f1e7; border-top: 2px solid #c9c3ae; border-bottom: 2px solid #c9c3ae; }

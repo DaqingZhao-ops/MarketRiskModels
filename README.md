@@ -85,7 +85,10 @@ historical volatility and SPY beta calculations. A row uses fallback values
 only when adequate market history is unavailable.
 Stocks, ETFs, and mutual funds also refresh from the latest available quote
 returned by the market-data feed. Treasury placeholders and sample options
-without exact tradable identifiers retain their editable illustrative prices.
+outside the stock-option fallback retain their editable illustrative prices.
+Stock options without a direct quote use a labeled Black-Scholes fallback.
+Simplified symbols such as `AAPL C250` assume 90 days to expiration; OCC symbols
+use their encoded expiration and strike.
 
 Import a Charles Schwab or Fidelity positions CSV directly. The importer recognizes
 their common Symbol, Description, Quantity, Price, and Market/Current Value column

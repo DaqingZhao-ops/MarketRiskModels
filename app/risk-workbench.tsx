@@ -588,6 +588,7 @@ export function RiskWorkbench() {
                     {position.marketPrice !== undefined ? (
                       <span className="market-quote">
                         <strong>{new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 4 }).format(position.marketPrice)}</strong>
+                        <em>{position.marketPriceSource === "black-scholes" ? "Black–Scholes fallback" : "Market quote"}</em>
                         <small>{position.marketPriceAt
                           ? new Date(position.marketPriceAt).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })
                           : "Latest available"}</small>
@@ -631,6 +632,8 @@ export function RiskWorkbench() {
           multiplier; option contracts use 100. Sample prices and option
           premiums remain illustrative when no exact tradable identifier is available.
           Stock, ETF, and mutual-fund prices refresh from the latest market feed.
+          Stock options without quotes use a labeled Black–Scholes fallback;
+          simplified option symbols assume 90 days to expiration.
           Delta is 1.0 for cash instruments.
           Risk source identifies calculated, supplied, fallback, and sample values.
         </p>
