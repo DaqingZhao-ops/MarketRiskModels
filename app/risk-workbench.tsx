@@ -65,6 +65,8 @@ export function RiskWorkbench() {
   const [message, setMessage] = useState("Sample diversified portfolio loaded.");
   const [history, setHistory] = useState<HistoricalData>();
   const [historyStatus, setHistoryStatus] = useState("Loading market history…");
+  const [remoteResult, setRemoteResult] = useState<RiskResult>();
+  const [engineStatus, setEngineStatus] = useState("Connecting to Python engine…");
 
   const symbolsKey = useMemo(
     () => [...new Set(positions.map((position) => position.symbol.trim().toUpperCase()))]
@@ -98,10 +100,44 @@ export function RiskWorkbench() {
     };
   }, [symbolsKey]);
 
-  const result: RiskResult = useMemo(
+  const continuityResult: RiskResult = useMemo(
     () => calculateRisk(positions, model, confidence, horizon, history),
     [positions, model, confidence, horizon, history],
   );
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      setRemoteResult(undefined);
+      setEngineStatus("Connecting to Python engine…");
+      try {
+        const response = await fetch("/api/risk", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ positions, model, confidence, horizon }),
+          signal: controller.signal,
+        });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.error ?? payload.detail ?? "Python engine unavailable.");
+        setRemoteResult(payload as RiskResult);
+        setEngineStatus(
+          payload.runId
+            ? `Python + SQLAlchemy · audit run ${payload.runId}`
+            : "Python + SQLAlchemy",
+        );
+      } catch {
+        if (controller.signal.aborted) return;
+        setRemoteResult(undefined);
+        setEngineStatus("TypeScript continuity engine");
+      }
+    }, 250);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [positions, model, confidence, horizon]);
+
+  const result = remoteResult ?? continuityResult;
 
   function updatePosition(id: string, field: keyof Position, raw: string) {
     setPositions((current) =>
@@ -147,7 +183,7 @@ export function RiskWorkbench() {
           <a href="#positions">Positions</a>
           <a href="#methodology">Methodology</a>
         </nav>
-        <div className="status"><i /> Model ready</div>
+        <div className="status"><i /> {engineStatus}</div>
       </header>
 
       <section className="hero" id="top">
@@ -211,7 +247,9 @@ export function RiskWorkbench() {
 
       <p className="notice" role="status">
         {model === "historical"
-          ? `${historyStatus}${result.historyStart && result.historyEnd
+          ? remoteResult
+            ? `${engineStatus}. ${result.observations.toLocaleString()} persisted observations, ${result.historyStart} to ${result.historyEnd}.`
+            : `${historyStatus}${result.historyStart && result.historyEnd
             ? ` ${result.observations.toLocaleString()} overlapping observations, ${result.historyStart} to ${result.historyEnd}. Source: ${history?.source}.`
             : ""}`
           : message}
@@ -375,14 +413,14 @@ export function RiskWorkbench() {
         </div>
         <aside>
           <strong>Important limitation</strong>
-          <p>This first release uses deterministic synthetic market histories for demonstration. It is not investment advice or a production risk limit system. Connect validated market data and independently validate models before financial use.</p>
+          <p>The preferred engine is Python with SQLAlchemy persistence; this hosted interface retains a TypeScript continuity engine until a Python service URL is configured. This is not investment advice or a production risk limit system. Independently validate data and models before financial use.</p>
         </aside>
       </section>
 
       <footer>
         <span>Market Risk Models</span>
         <p>Transparent analytics for better risk conversations.</p>
-        <small>Model version 0.1.0 · Built for review, testing, and extension.</small>
+        <small>Model version 0.2.0 · Python-first, portable, and auditable.</small>
       </footer>
     </main>
   );

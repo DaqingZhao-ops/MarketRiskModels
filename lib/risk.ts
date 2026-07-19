@@ -39,6 +39,8 @@ export type RiskResult = {
   contributions: Contribution[];
   historyStart?: string;
   historyEnd?: string;
+  engine?: string;
+  runId?: number;
 };
 
 export const DEFAULT_POSITIONS: Position[] = [

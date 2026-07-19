@@ -3,37 +3,75 @@
 A transparent portfolio-risk workbench for stocks, ETFs, mutual funds, bonds,
 and options on stocks, ETFs, and bonds.
 
-## Current models
+## Architecture
 
-- Historical simulation using synchronized adjusted daily market closes
-- Correlated Monte Carlo simulation
+The project now uses a hybrid architecture:
+
+- **Python + NumPy** is the preferred quantitative engine.
+- **FastAPI** exposes risk calculations through a versioned API.
+- **SQLite + SQLAlchemy** stores market history and calculation audit records
+  during development.
+- **Alembic** manages schema migrations.
+- **PostgreSQL** is the production database target.
+- **TypeScript/React** remains the interactive web interface.
+- The original TypeScript calculations remain as a continuity fallback when a
+  Python service URL is not configured.
+
+The current `chatgpt.site` deployment runs the web interface and its continuity
+engine. It cannot run the Python process itself. Configure
+`PYTHON_RISK_API_URL` after deploying the Python service to make Python and the
+database the live calculation path.
+
+See [docs/architecture.md](docs/architecture.md) and
+[docs/development-data-policy.md](docs/development-data-policy.md).
+
+## Models
+
+- Historical simulation using synchronized adjusted daily closes
+- Correlated Monte Carlo using a repaired correlation matrix and Cholesky factor
 - Parametric variance-covariance VaR
 - Expected Shortfall for every model
-- Position-level risk contributions
+- Position-level contributions
 - One-day and ten-day horizons at 95%, 97.5%, and 99% confidence
 
-Historical VaR is calculated from up to four years of adjusted daily closes
-retrieved server-side from Yahoo Finance. Observations are aligned by trading
-date across the portfolio. One-day VaR uses close-to-close returns; ten-day VaR
-uses actual overlapping ten-trading-day returns rather than square-root-of-time
-scaling. Options are delta-repriced against their parsed underlying ticker, and
-the `UST10Y` sample position uses `TLT` as an explicit Treasury-duration proxy.
+The Python historical engine stores up to four years of Yahoo Finance adjusted
+daily closes in the development database. It aligns observations by trading
+date and uses actual overlapping ten-trading-day returns. Options are
+delta-repriced against parsed underlying symbols, and `UST10Y` maps explicitly
+to the `TLT` Treasury-duration proxy.
 
-Monte Carlo remains deterministic so results are reproducible. This application
-is an educational and engineering foundation—not a validated production risk
-limit system. Independently validate data licensing, proxies, corporate-action
-handling, option approximations, and model results before production use.
+## Run the Python service
 
-## Run locally
+Requirements: Python 3.11 or newer.
+
+```bash
+cd backend
+python3 -m venv .venv
+.venv/bin/pip install -e '.[dev]'
+.venv/bin/alembic upgrade head
+.venv/bin/uvicorn market_risk.api:app --reload
+```
+
+The API runs at `http://localhost:8000`; interactive API documentation is at
+`http://localhost:8000/docs`.
+
+The default development database is `backend/data/market_risk.db`. Override it
+with `MARKET_RISK_DATABASE_URL`. For PostgreSQL, use a SQLAlchemy PostgreSQL
+URL and apply Alembic migrations before starting the service.
+
+## Run the web interface
 
 Requirements: Node.js 22.13 or newer.
 
 ```bash
+cp .env.example .env.local
 npm install
 npm run dev
 ```
 
-Open `http://localhost:3000`.
+Open `http://localhost:3000`. Set `PYTHON_RISK_API_URL=http://localhost:8000`
+to use the Python service. If it is absent or unavailable, the interface
+clearly identifies that it is using the TypeScript continuity engine.
 
 ## Portfolio CSV
 
@@ -47,18 +85,20 @@ AAPL C200,Stock Option,46000,0.46,1.25,0.62
 ```
 
 Volatility is annualized and expressed as a decimal. Options use
-delta-adjusted underlying returns; historical VaR does not use the volatility
-or beta columns. A future release should add gamma, vega, curve factors,
-backtesting, and stress scenarios.
+delta-adjusted underlying returns. Historical VaR does not use the volatility
+or beta columns.
 
 ## Validation
 
 ```bash
+cd backend && .venv/bin/pytest
 npm test
 npm run lint
 ```
 
 ## Important
 
-This software is not investment advice. Independently validate all data,
-assumptions, pricing functions, and model outputs before financial use.
+This software is not investment advice or a validated production risk-limit
+system. Independently validate data licensing, proxies, corporate-action
+handling, option approximations, pricing functions, and model outputs before
+financial use.
