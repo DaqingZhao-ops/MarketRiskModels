@@ -74,6 +74,20 @@ Open `http://localhost:3000`. Set `PYTHON_RISK_API_URL=http://localhost:8000`
 to use the Python service. If it is absent or unavailable, the interface
 clearly identifies that it is using the TypeScript continuity engine.
 
+## Run as a Mac app
+
+The native Apple Silicon desktop package is maintained separately on the
+`codex/macos-app` branch so the hosted web edition remains unchanged.
+
+```bash
+npm run desktop:build
+```
+
+Open `artifacts/Market Risk Models.app`. It launches the local React server,
+Python risk engine, and SQLite database, while using the internet for current
+market prices, historical data, and the Treasury curve. See
+[docs/macos-app.md](docs/macos-app.md).
+
 ## Portfolio CSV
 
 Portfolio defaults and version history are stored durably in the hosted D1

@@ -1,7 +1,7 @@
 from datetime import date, datetime, timezone
 from typing import Any
 
-from sqlalchemy import Date, DateTime, Float, Index, JSON, String, UniqueConstraint
+from sqlalchemy import Boolean, Date, DateTime, Float, Index, JSON, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .database import Base
@@ -53,3 +53,23 @@ class RiskRun(Base):
     result_payload: Mapped[dict[str, Any]] = mapped_column(JSON)
     engine_version: Mapped[str] = mapped_column(String(32))
 
+
+class PortfolioVersion(Base):
+    __tablename__ = "portfolio_versions"
+    __table_args__ = (Index("ix_portfolio_versions_default_archive", "is_default", "archived_at"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    source_name: Mapped[str] = mapped_column(String(255), default="Saved portfolio")
+    positions_json: Mapped[list[dict[str, Any]]] = mapped_column(JSON)
+    is_default: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+
+
+class RateCalibration(Base):
+    __tablename__ = "rate_calibrations"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    calibrated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=False, index=True)

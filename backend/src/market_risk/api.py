@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from . import __version__
 from .config import Settings, get_settings
 from .database import Base, engine, get_session
+from .desktop_api import router as desktop_router
 from .engine import calculate_risk
 from .market_data import load_series
 from .models import RiskRun
@@ -33,12 +34,13 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.origins,
     allow_credentials=False,
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "PUT"],
     allow_headers=["Content-Type"],
 )
 
 SessionDependency = Annotated[Session, Depends(get_session)]
 SettingsDependency = Annotated[Settings, Depends(get_settings)]
+app.include_router(desktop_router)
 
 
 @app.get("/health")

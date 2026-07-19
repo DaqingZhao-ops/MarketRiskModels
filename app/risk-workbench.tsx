@@ -17,6 +17,7 @@ import {
   type HullWhiteCalibration,
   isHullWhiteStale,
 } from "../lib/hull-white";
+import { apiUrl } from "../lib/api-client";
 
 const money = new Intl.NumberFormat("en-US", {
   style: "currency",
@@ -217,7 +218,7 @@ export function RiskWorkbench() {
 
   useEffect(() => {
     const controller = new AbortController();
-    void fetch("/api/portfolios", { signal: controller.signal })
+    void fetch(apiUrl("/api/portfolios"), { signal: controller.signal })
       .then(async (response) => {
         const payload = await response.json();
         if (!response.ok) throw new Error(payload.error ?? "Unable to load saved portfolios.");
@@ -246,7 +247,7 @@ export function RiskWorkbench() {
 
   useEffect(() => {
     const controller = new AbortController();
-    void fetch("/api/rates", { signal: controller.signal })
+    void fetch(apiUrl("/api/rates"), { signal: controller.signal })
       .then(async (response) => {
         const payload = await response.json();
         if (!response.ok) throw new Error(payload.error ?? "Unable to load the interest-rate model.");
@@ -281,7 +282,7 @@ export function RiskWorkbench() {
     const timer = window.setTimeout(async () => {
       setHistoryStatus("Loading market history…");
       try {
-        const response = await fetch(`/api/history?symbols=${encodeURIComponent(symbolsKey)}`, {
+        const response = await fetch(apiUrl(`/api/history?symbols=${encodeURIComponent(symbolsKey)}`), {
           signal: controller.signal,
         });
         const payload = await response.json();
@@ -296,7 +297,7 @@ export function RiskWorkbench() {
         setPositions(enriched);
         setHistoryStatus("Latest eligible prices and market history loaded.");
         try {
-          const persistResponse = await fetch("/api/portfolios", {
+          const persistResponse = await fetch(apiUrl("/api/portfolios"), {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ positions: enriched }),
@@ -337,7 +338,7 @@ export function RiskWorkbench() {
       setRemoteResult(undefined);
       setEngineStatus("Connecting to Python engine…");
       try {
-        const response = await fetch("/api/risk", {
+        const response = await fetch(apiUrl("/api/risk"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ positions, model, confidence, horizon }),
@@ -475,7 +476,7 @@ export function RiskWorkbench() {
     previousPositions: Position[],
     sourceName = "Edited portfolio",
   ) {
-    const response = await fetch("/api/portfolios", {
+    const response = await fetch(apiUrl("/api/portfolios"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ positions: nextPositions, previousPositions, sourceName }),
@@ -549,7 +550,7 @@ export function RiskWorkbench() {
     setRefreshingRateModel(true);
     setRateModelStatus("Refreshing the Treasury curve and storing a new calibration…");
     try {
-      const response = await fetch("/api/rates", { method: "POST" });
+      const response = await fetch(apiUrl("/api/rates"), { method: "POST" });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error ?? "Unable to refresh Hull–White calibration.");
       const calibration = payload.calibration as HullWhiteCalibration;
