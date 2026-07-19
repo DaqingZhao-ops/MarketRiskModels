@@ -219,7 +219,7 @@ test("builds an efficient frontier and locates the current portfolio", () => {
   assert.equal(result.recommendations.length, 3);
   assert.equal(result.allocationAlternatives.length, 2);
   assert.ok(result.allocationAlternatives.every((alternative) =>
-    alternative.turnover <= 0.1100001));
+    alternative.turnover <= 0.1300001));
   assert.ok(result.allocationAlternatives.every((alternative) =>
     alternative.changes.length === 3));
   assert.ok(result.allocationAlternatives.every((alternative) =>

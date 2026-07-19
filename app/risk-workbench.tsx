@@ -795,10 +795,10 @@ export function RiskWorkbench() {
             <div className="allocation-alternatives">
               <div className="allocation-alternatives-heading">
                 <p className="eyebrow">Incremental allocation ideas</p>
-                <h3>Two approximately 11% changes</h3>
+                <h3>Two approximately 13% changes</h3>
                 <p>
-                  Both retain 89% of the current mapped allocation, tilt 10%
-                  toward the maximum-Sharpe portfolio, and reserve 1% for a
+                  Both retain 87% of the current mapped allocation, tilt 10%
+                  toward the maximum-Sharpe portfolio, and reserve 3% for a
                   small deterministic randomized change.
                 </p>
               </div>
