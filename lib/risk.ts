@@ -448,7 +448,7 @@ export function calculateEfficientFrontier(
     const randomTotal = randomRaw.reduce((sum, weight) => sum + weight, 0);
     const randomWeights = randomRaw.map((weight) => weight / randomTotal);
     const weights = allocationBaseWeights.map((weight, index) =>
-      weight * 0.95 + maxSharpeWeights[index] * 0.04 + randomWeights[index] * 0.01);
+      weight * 0.89 + maxSharpeWeights[index] * 0.10 + randomWeights[index] * 0.01);
     const point = pointFor(weights);
     return {
       candidateIndex,
@@ -468,11 +468,11 @@ export function calculateEfficientFrontier(
   const alternativeNames = [
     {
       name: "Measured improvement",
-      description: "A 4% frontier tilt plus a 1% randomized diversification sleeve.",
+      description: "A 10% frontier tilt plus a 1% randomized diversification sleeve.",
     },
     {
       name: "Diversified improvement",
-      description: "The same 5% change budget with a different randomized sleeve.",
+      description: "The same 11% change budget with a different randomized sleeve.",
     },
   ];
   const allocationAlternatives = selectedAlternatives.map((candidate, alternativeIndex) => ({
