@@ -12,6 +12,20 @@ export type Position = {
 
 export type Contribution = Position & { amount: number; share: number };
 
+export type HistoricalSeries = {
+  symbol: string;
+  sourceSymbol: string;
+  dates: string[];
+  adjustedClose: number[];
+};
+
+export type HistoricalData = {
+  source: string;
+  fetchedAt: string;
+  series: HistoricalSeries[];
+  mappings: Record<string, string>;
+};
+
 export type RiskResult = {
   marketValue: number;
   var: number;
@@ -23,6 +37,8 @@ export type RiskResult = {
   range: number;
   varMarker: number;
   contributions: Contribution[];
+  historyStart?: string;
+  historyEnd?: string;
 };
 
 export const DEFAULT_POSITIONS: Position[] = [
@@ -51,7 +67,10 @@ function normal(random: () => number) {
 
 function quantile(sorted: number[], probability: number) {
   if (!sorted.length) return 0;
-  const index = Math.min(sorted.length - 1, Math.max(0, Math.floor(probability * sorted.length)));
+  const index = Math.min(
+    sorted.length - 1,
+    Math.max(0, Math.ceil(probability * sorted.length) - 1),
+  );
   return sorted[index];
 }
 
@@ -115,6 +134,58 @@ function scenarioLosses(positions: Position[], count: number, heavyTails: boolea
   return losses;
 }
 
+function historicalLosses(positions: Position[], history: HistoricalData, horizon: number) {
+  const seriesBySymbol = new Map(history.series.map((item) => [item.symbol, item]));
+  const dateSets = positions
+    .map((position) => seriesBySymbol.get(position.symbol)?.dates)
+    .filter((dates): dates is string[] => Boolean(dates))
+    .map((dates) => new Set(dates));
+  if (dateSets.length !== positions.length || !dateSets.length) return { losses: [], dates: [] };
+
+  const commonDates = history.series[0].dates
+    .filter((date) => dateSets.every((dates) => dates.has(date)))
+    .sort();
+  const priceMaps = new Map(
+    history.series.map((item) => [
+      item.symbol,
+      new Map(item.dates.map((date, index) => [date, item.adjustedClose[index]])),
+    ]),
+  );
+  const losses: number[] = [];
+  const endingDates: string[] = [];
+  for (let index = horizon; index < commonDates.length; index += 1) {
+    const start = commonDates[index - horizon];
+    const end = commonDates[index];
+    let pnl = 0;
+    let valid = true;
+    for (const position of positions) {
+      const prices = priceMaps.get(position.symbol);
+      const startPrice = prices?.get(start);
+      const endPrice = prices?.get(end);
+      if (!startPrice || !endPrice) {
+        valid = false;
+        break;
+      }
+      const underlyingReturn = endPrice / startPrice - 1;
+      pnl += position.marketValue * position.delta * underlyingReturn;
+    }
+    if (valid) {
+      losses.push(-pnl);
+      endingDates.push(end);
+    }
+  }
+  return { losses, dates: endingDates };
+}
+
+function sampleDeviation(values: number[]) {
+  if (values.length < 2) return 0;
+  const mean = values.reduce((sum, value) => sum + value, 0) / values.length;
+  return Math.sqrt(
+    values.reduce((sum, value) => sum + (value - mean) ** 2, 0) /
+      (values.length - 1),
+  );
+}
+
 function buildHistogram(losses: number[], range: number) {
   const bins = Array.from({ length: 31 }, () => 0);
   for (const loss of losses) {
@@ -131,16 +202,31 @@ export function calculateRisk(
   model: ModelKind,
   confidence: number,
   horizon: number,
+  history?: HistoricalData,
 ): RiskResult {
   const marketValue = positions.reduce((sum, position) => sum + Math.abs(position.marketValue), 0) || 1;
-  const dailyVolatility = portfolioDailyVolatility(positions);
+  let dailyVolatility = portfolioDailyVolatility(positions);
   const scale = Math.sqrt(horizon);
   let losses: number[];
   let valueAtRisk: number;
   let expectedShortfall: number;
   let observations: number;
+  let historyDates: string[] = [];
 
-  if (model === "parametric") {
+  if (model === "historical") {
+    const historical = history
+      ? historicalLosses(positions, history, horizon)
+      : { losses: [], dates: [] };
+    losses = historical.losses;
+    historyDates = historical.dates;
+    observations = losses.length;
+    const oneDay = history ? historicalLosses(positions, history, 1).losses : [];
+    dailyVolatility = sampleDeviation(oneDay);
+    const sorted = [...losses].sort((a, b) => a - b);
+    valueAtRisk = Math.max(0, quantile(sorted, confidence));
+    const tail = sorted.filter((loss) => loss >= valueAtRisk);
+    expectedShortfall = tail.reduce((sum, loss) => sum + loss, 0) / Math.max(1, tail.length);
+  } else if (model === "parametric") {
     const z = inverseNormal(confidence);
     valueAtRisk = z * dailyVolatility * scale;
     expectedShortfall =
@@ -150,8 +236,8 @@ export function calculateRisk(
     losses = scenarioLosses(positions, 2500, false).map((loss) => loss * scale);
     observations = positions.length ** 2;
   } else {
-    observations = model === "historical" ? 756 : 10000;
-    losses = scenarioLosses(positions, observations, model === "historical").map((loss) => loss * scale);
+    observations = 10000;
+    losses = scenarioLosses(positions, observations, false).map((loss) => loss * scale);
     const sorted = [...losses].sort((a, b) => a - b);
     valueAtRisk = Math.max(0, quantile(sorted, confidence));
     const tail = sorted.filter((loss) => loss >= valueAtRisk);
@@ -193,6 +279,8 @@ export function calculateRisk(
     range,
     varMarker,
     contributions,
+    historyStart: historyDates[0],
+    historyEnd: historyDates.at(-1),
   };
 }
 

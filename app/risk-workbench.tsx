@@ -1,8 +1,9 @@
 "use client";
 
-import { ChangeEvent, useMemo, useState } from "react";
+import { ChangeEvent, useEffect, useMemo, useState } from "react";
 import {
   DEFAULT_POSITIONS,
+  HistoricalData,
   ModelKind,
   Position,
   RiskResult,
@@ -24,7 +25,7 @@ const percent = new Intl.NumberFormat("en-US", {
 const MODEL_COPY: Record<ModelKind, { label: string; note: string }> = {
   historical: {
     label: "Historical simulation",
-    note: "Replays 756 equally weighted market scenarios.",
+    note: "Replays synchronized adjusted-close market returns.",
   },
   monteCarlo: {
     label: "Monte Carlo",
@@ -62,10 +63,44 @@ export function RiskWorkbench() {
   const [confidence, setConfidence] = useState(0.99);
   const [horizon, setHorizon] = useState(1);
   const [message, setMessage] = useState("Sample diversified portfolio loaded.");
+  const [history, setHistory] = useState<HistoricalData>();
+  const [historyStatus, setHistoryStatus] = useState("Loading market history…");
+
+  const symbolsKey = useMemo(
+    () => [...new Set(positions.map((position) => position.symbol.trim().toUpperCase()))]
+      .sort()
+      .join(","),
+    [positions],
+  );
+
+  useEffect(() => {
+    if (!symbolsKey) return;
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      setHistoryStatus("Loading market history…");
+      try {
+        const response = await fetch(`/api/history?symbols=${encodeURIComponent(symbolsKey)}`, {
+          signal: controller.signal,
+        });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.error ?? "Unable to load market history.");
+        setHistory(payload as HistoricalData);
+        setHistoryStatus("Market history loaded.");
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        setHistory(undefined);
+        setHistoryStatus(error instanceof Error ? error.message : "Unable to load market history.");
+      }
+    }, 350);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [symbolsKey]);
 
   const result: RiskResult = useMemo(
-    () => calculateRisk(positions, model, confidence, horizon),
-    [positions, model, confidence, horizon],
+    () => calculateRisk(positions, model, confidence, horizon, history),
+    [positions, model, confidence, horizon, history],
   );
 
   function updatePosition(id: string, field: keyof Position, raw: string) {
@@ -174,7 +209,13 @@ export function RiskWorkbench() {
         </label>
       </section>
 
-      <p className="notice" role="status">{message}</p>
+      <p className="notice" role="status">
+        {model === "historical"
+          ? `${historyStatus}${result.historyStart && result.historyEnd
+            ? ` ${result.observations.toLocaleString()} overlapping observations, ${result.historyStart} to ${result.historyEnd}. Source: ${history?.source}.`
+            : ""}`
+          : message}
+      </p>
 
       <section className="metrics" id="overview">
         <Metric
@@ -209,7 +250,7 @@ export function RiskWorkbench() {
             </div>
             <span className="model-pill">{MODEL_COPY[model].label}</span>
           </div>
-          <div className="histogram" aria-label="Simulated profit and loss distribution">
+          <div className="histogram" aria-label="Profit and loss distribution">
             {result.histogram.map((height, index) => (
               <i
                 key={index}
