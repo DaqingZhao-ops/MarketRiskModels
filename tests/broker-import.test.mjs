@@ -15,6 +15,19 @@ import {
   isHullWhiteStale,
 } from "../lib/hull-white.ts";
 
+const optionRateCalibration = fitHullWhiteCurve([
+  { maturity: 0.25, yield: 0.04 },
+  { maturity: 1, yield: 0.041 },
+  { maturity: 5, yield: 0.043 },
+  { maturity: 10, yield: 0.045 },
+], "2026-03-02T00:00:00Z");
+const optionG2Calibration = fitG2Curve([
+  { maturity: 0.25, yield: 0.04 },
+  { maturity: 1, yield: 0.041 },
+  { maturity: 5, yield: 0.043 },
+  { maturity: 10, yield: 0.045 },
+], "2026-03-02T00:00:00Z");
+
 test("imports a Fidelity positions export", () => {
   const csv = `Account Number,Account Name,Symbol,Description,Quantity,Last Price,Current Value,Type
 Z12345678,Brokerage,AAPL,"APPLE INC",100,$220.00,"$22,000.00",Cash
@@ -154,11 +167,32 @@ test("uses a labeled Black-Scholes fallback for simplified stock options", () =>
       { symbol: "AAPL C250", sourceSymbol: "AAPL", dates, adjustedClose, latestPrice: 225, latestPriceAt: "2026-03-02T21:00:00Z" },
       { symbol: "SPY", sourceSymbol: "SPY", dates, adjustedClose: adjustedClose.map((price) => price * 2) },
     ],
-  }, new Date("2026-03-02T00:00:00Z"));
+  }, new Date("2026-03-02T00:00:00Z"), optionRateCalibration);
   assert.equal(enriched.marketPriceSource, "black-scholes");
+  assert.equal(enriched.marketPriceModel, "Hull-White 1F");
+  assert.ok(Math.abs(enriched.marketPriceRate - -Math.log(
+    hullWhiteDiscountFactor(optionRateCalibration, 90 / 365.25),
+  ) / (90 / 365.25)) < 1e-12);
+  assert.equal(enriched.marketPriceRateTenor, 90 / 365.25);
   assert.ok(enriched.marketPrice > 0);
   assert.equal(enriched.price, enriched.marketPrice);
   assert.ok(enriched.delta > 0 && enriched.delta < 1);
+  const [repriced] = enrichPositionsWithHistoricalRisk(
+    [enriched],
+    {
+      source: "test",
+      fetchedAt: "2026-03-02T00:00:00Z",
+      mappings: { "AAPL C250": "AAPL", SPY: "SPY" },
+      series: [
+        { symbol: "AAPL C250", sourceSymbol: "AAPL", dates, adjustedClose, latestPrice: 225 },
+        { symbol: "SPY", sourceSymbol: "SPY", dates, adjustedClose },
+      ],
+    },
+    new Date("2026-03-02T00:00:00Z"),
+    optionG2Calibration,
+  );
+  assert.equal(repriced.marketPriceModel, "G2++ 2F");
+  assert.equal(repriced.marketPriceRate, enriched.marketPriceRate);
 });
 
 test("uses the Black-Scholes fallback for SPY ETF options", () => {
@@ -187,7 +221,7 @@ test("uses the Black-Scholes fallback for SPY ETF options", () => {
       { symbol: "SPY P600", sourceSymbol: "SPY", dates, adjustedClose, latestPrice: 625, latestPriceAt: "2026-03-02T21:00:00Z" },
       { symbol: "SPY", sourceSymbol: "SPY", dates, adjustedClose, latestPrice: 625 },
     ],
-  }, new Date("2026-03-02T00:00:00Z"));
+  }, new Date("2026-03-02T00:00:00Z"), optionRateCalibration);
   assert.equal(enriched.marketPriceSource, "black-scholes");
   assert.ok(enriched.marketPrice > 0);
   assert.ok(enriched.delta < 0 && enriched.delta > -1);

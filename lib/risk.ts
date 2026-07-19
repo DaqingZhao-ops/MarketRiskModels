@@ -24,6 +24,8 @@ export type Position = {
   marketPriceAt?: string;
   marketPriceSource?: "market" | "black-scholes" | "treasury-curve" | "hull-white";
   marketPriceModel?: RateModelName;
+  marketPriceRate?: number;
+  marketPriceRateTenor?: number;
   riskSource?: "provided" | "historical-pending" | "historical" | "fallback";
 };
 
@@ -143,8 +145,8 @@ export function enrichPositionsWithHistoricalRisk(
   const benchmark = history.series.find((item) => item.symbol === "SPY");
   return positions.map((position) => {
     const refreshRisk = ["historical-pending", "fallback"].includes(position.riskSource ?? "");
-    const rateSensitive = ["Bond", "Bond Option"].includes(position.type);
-    if (!refreshRisk && !rateSensitive) return position;
+    const modelSensitive = ["Bond", "Bond Option", "Stock Option", "ETF Option"].includes(position.type);
+    if (!refreshRisk && !modelSensitive) return position;
     const series = history.series.find((item) => item.symbol === position.symbol);
     if (!series || series.adjustedClose.length < 30) {
       return refreshRisk ? { ...position, riskSource: "fallback" as const } : position;
@@ -157,16 +159,16 @@ export function enrichPositionsWithHistoricalRisk(
       ? modelHullWhiteBondOption(position.symbol, rateCalibration)
       : undefined;
     const optionDelta = position.type.endsWith("Option")
-      ? blackScholesDelta(position.symbol, underlyingPrice, volatility, asOf)
+      ? blackScholesDelta(position.symbol, underlyingPrice, volatility, asOf, rateCalibration)
       : 1;
     const canRefreshPrice = ["Stock", "ETF", "Mutual Fund"].includes(position.type) &&
       typeof series.latestPrice === "number" && Number.isFinite(series.latestPrice) &&
       series.latestPrice > 0;
     const modeledOptionPrice = ["Stock Option", "ETF Option"].includes(position.type)
-      ? blackScholesPrice(position.symbol, underlyingPrice, volatility, asOf)
+      ? blackScholesPrice(position.symbol, underlyingPrice, volatility, asOf, rateCalibration)
       : undefined;
-    const hasModeledOptionPrice = typeof modeledOptionPrice === "number" &&
-      Number.isFinite(modeledOptionPrice) && modeledOptionPrice >= 0;
+    const hasModeledOptionPrice = modeledOptionPrice !== undefined &&
+      Number.isFinite(modeledOptionPrice.price) && modeledOptionPrice.price >= 0;
     const treasuryModelPrice = position.type === "Bond"
       ? modelTreasuryPrice(
           position.symbol,
@@ -179,7 +181,7 @@ export function enrichPositionsWithHistoricalRisk(
     const latestPrice = canRefreshPrice
       ? series.latestPrice as number
       : hasModeledOptionPrice
-        ? modeledOptionPrice
+        ? modeledOptionPrice.price
         : hullWhiteOption
           ? hullWhiteOption.price
         : hasTreasuryModelPrice
@@ -205,9 +207,11 @@ export function enrichPositionsWithHistoricalRisk(
           : hasTreasuryModelPrice
             ? "treasury-curve"
             : undefined,
-      marketPriceModel: hullWhiteOption || hasTreasuryModelPrice
+      marketPriceModel: hullWhiteOption || hasTreasuryModelPrice || hasModeledOptionPrice
         ? rateCalibration?.model
         : undefined,
+      marketPriceRate: hasModeledOptionPrice ? modeledOptionPrice.riskFreeRate : undefined,
+      marketPriceRateTenor: hasModeledOptionPrice ? modeledOptionPrice.years : undefined,
       marketValue: Math.abs(position.quantity * latestPrice * position.multiplier),
       volatility: refreshRisk && Number.isFinite(volatility) && volatility > 0
         ? volatility
@@ -298,32 +302,56 @@ function optionTerms(symbol: string, asOf: Date) {
   return { callPut: simple[1].toUpperCase(), strike: Number(simple[2]), years: 90 / 365.25 };
 }
 
-function blackScholesInputs(symbol: string, spot: number, volatility: number, asOf: Date) {
+function blackScholesInputs(
+  symbol: string,
+  spot: number,
+  volatility: number,
+  asOf: Date,
+  rateCalibration?: HullWhiteCalibration,
+) {
   const terms = optionTerms(symbol, asOf);
-  if (!terms || spot <= 0 || volatility <= 0 || terms.strike <= 0) return undefined;
+  if (!terms || !rateCalibration || spot <= 0 || volatility <= 0 || terms.strike <= 0) {
+    return undefined;
+  }
   const { callPut, strike, years } = terms;
-  const d1 = (Math.log(spot / strike) + (0.043 + volatility ** 2 / 2) * years) /
+  const discountFactor = hullWhiteDiscountFactor(rateCalibration, years);
+  if (!discountFactor || discountFactor <= 0) return undefined;
+  const riskFreeRate = -Math.log(discountFactor) / years;
+  const d1 = (Math.log(spot / strike) + (riskFreeRate + volatility ** 2 / 2) * years) /
     (volatility * Math.sqrt(years));
   const d2 = d1 - volatility * Math.sqrt(years);
-  return { callPut, strike, years, d1, d2 };
+  return { callPut, strike, years, riskFreeRate, d1, d2 };
 }
 
-function blackScholesDelta(symbol: string, spot: number, volatility: number, asOf: Date) {
-  const inputs = blackScholesInputs(symbol, spot, volatility, asOf);
+function blackScholesDelta(
+  symbol: string,
+  spot: number,
+  volatility: number,
+  asOf: Date,
+  rateCalibration?: HullWhiteCalibration,
+) {
+  const inputs = blackScholesInputs(symbol, spot, volatility, asOf, rateCalibration);
   if (!inputs) return undefined;
   const { callPut, d1 } = inputs;
   const callDelta = normalCdf(d1);
   return callPut === "P" ? callDelta - 1 : callDelta;
 }
 
-function blackScholesPrice(symbol: string, spot: number, volatility: number, asOf: Date) {
-  const inputs = blackScholesInputs(symbol, spot, volatility, asOf);
+function blackScholesPrice(
+  symbol: string,
+  spot: number,
+  volatility: number,
+  asOf: Date,
+  rateCalibration?: HullWhiteCalibration,
+) {
+  const inputs = blackScholesInputs(symbol, spot, volatility, asOf, rateCalibration);
   if (!inputs) return undefined;
-  const { callPut, strike, years, d1, d2 } = inputs;
-  const discountedStrike = strike * Math.exp(-0.043 * years);
-  return callPut === "C"
+  const { callPut, strike, years, riskFreeRate, d1, d2 } = inputs;
+  const discountedStrike = strike * Math.exp(-riskFreeRate * years);
+  const price = callPut === "C"
     ? spot * normalCdf(d1) - discountedStrike * normalCdf(d2)
     : discountedStrike * normalCdf(-d2) - spot * normalCdf(-d1);
+  return { price, riskFreeRate, years };
 }
 
 function normalCdf(value: number) {

@@ -310,6 +310,8 @@ export function RiskWorkbench() {
             marketPriceAt: undefined,
             marketPriceSource: undefined,
             marketPriceModel: undefined,
+            marketPriceRate: undefined,
+            marketPriceRateTenor: undefined,
             riskSource: position.riskSource === "provided" ? "provided" : "historical-pending",
           })));
           setPortfolioSaveStatus(`Saved default from ${new Date(savedDefault.createdAt).toLocaleString()}.`);
@@ -592,6 +594,8 @@ export function RiskWorkbench() {
           updated.marketPriceAt = undefined;
           updated.marketPriceSource = undefined;
           updated.marketPriceModel = undefined;
+          updated.marketPriceRate = undefined;
+          updated.marketPriceRateTenor = undefined;
           updated.riskSource = "historical-pending";
         }
         if (field === "volatility" || field === "beta" || field === "delta") {
@@ -1413,7 +1417,11 @@ export function RiskWorkbench() {
                         <strong>{new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 4 }).format(position.marketPrice)}</strong>
                         <em>{
                           position.marketPriceSource === "black-scholes"
-                            ? "Black–Scholes fallback"
+                            ? `Black–Scholes · ${position.marketPriceModel ?? "rate model"} · ${
+                                position.marketPriceRate !== undefined
+                                  ? `${(position.marketPriceRate * 100).toFixed(3)}% zero / ${Math.round((position.marketPriceRateTenor ?? 0) * 365.25)}d`
+                                  : "rate unavailable"
+                              }`
                             : position.marketPriceSource === "hull-white"
                               ? `Priced with ${position.marketPriceModel ?? rateCalibration?.model ?? "rate model"}`
                             : position.marketPriceSource === "treasury-curve"

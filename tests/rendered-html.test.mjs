@@ -58,7 +58,7 @@ test("server-renders the market risk workbench", async () => {
   assert.match(html, /30D range/);
   assert.doesNotMatch(html, /Sort by Multiplier/);
   assert.match(html, /Unavailable/);
-  assert.match(html, /Black–Scholes fallback/);
+  assert.match(html, /Black–Scholes/);
   assert.match(html, /Priced with/);
   assert.match(html, /selected stored interest-rate model’s initial discount curve/);
   assert.match(html, /G2\+\+ two factor/);
