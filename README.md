@@ -80,7 +80,14 @@ BABA, NVDA, INTC, COST, KLAC, SPY, SCHD, and FAGIX share quantities, plus
 representative equity options, Treasury exposures, and Treasury options.
 Prices and option premiums are illustrative inputs and can be edited.
 
-Import a CSV with these columns:
+Import a Charles Schwab or Fidelity positions CSV directly. The importer recognizes
+their common Symbol, Description, Quantity, Price, and Market/Current Value column
+names, including currency formatting and quoted descriptions. Cash, totals, and
+account-summary rows are ignored. Because broker position exports do not contain
+risk sensitivities, the app assigns editable volatility, beta, and delta estimates
+based on the inferred instrument class.
+
+The app's native CSV format remains supported:
 
 ```csv
 symbol,type,quantity,price,multiplier,marketValue,volatility,beta,delta

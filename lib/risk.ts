@@ -311,31 +311,124 @@ export function calculateRisk(
 }
 
 export function parsePositionsCsv(text: string): Position[] {
-  const rows = text.trim().split(/\r?\n/).filter(Boolean);
-  if (rows.length < 2) throw new Error("CSV must include a header and at least one position.");
-  const headers = rows[0].split(",").map((value) => value.trim());
-  const required = ["symbol", "type", "marketValue", "volatility", "beta", "delta"];
-  if (required.some((name) => !headers.includes(name))) {
-    throw new Error(`CSV columns must include: ${required.join(", ")}.`);
-  }
-  return rows.slice(1).map((row, index) => {
-    const values = row.split(",").map((value) => value.trim());
-    const record = Object.fromEntries(headers.map((header, column) => [header, values[column]]));
-    const position = {
-      id: `import-${index}-${record.symbol}`,
-      symbol: record.symbol,
-      type: record.type,
-      quantity: Number(record.quantity ?? 0),
-      price: Number(record.price ?? 0),
-      multiplier: Number(record.multiplier ?? 1),
-      marketValue: Number(record.marketValue),
-      volatility: Number(record.volatility),
-      beta: Number(record.beta),
-      delta: Number(record.delta),
-    };
-    if (!position.symbol || Object.values(position).some((value) => typeof value === "number" && !Number.isFinite(value))) {
-      throw new Error(`Invalid values on CSV row ${index + 2}.`);
-    }
-    return position;
+  const rows = parseCsvRows(text);
+  const headerIndex = rows.findIndex((row) => {
+    const normalized = row.map(normalizeHeader);
+    return normalized.includes("symbol") &&
+      normalized.some((header) => ["quantity", "shares"].includes(header));
   });
+  if (headerIndex < 0) {
+    throw new Error("No Schwab, Fidelity, or Market Risk Models position header was found.");
+  }
+  const headers = rows[headerIndex].map(normalizeHeader);
+  const nativeFormat = headers.includes("volatility") && headers.includes("beta") && headers.includes("delta");
+  const positions = rows.slice(headerIndex + 1).flatMap((values, index) => {
+    const record = Object.fromEntries(headers.map((header, column) => [header, values[column] ?? ""]));
+    const symbol = field(record, "symbol").trim();
+    const description = field(record, "description", "name", "securitydescription");
+    if (!symbol || /^(cash|pending activity|total|account total|--?)$/i.test(symbol) ||
+        /money market|cash & cash investments|account total/i.test(description)) return [];
+    const quantity = parseBrokerNumber(field(record, "quantity", "shares"));
+    const price = parseBrokerNumber(field(record, "price", "lastprice", "currentprice", "mostrecentprice", "marketprice"));
+    const suppliedValue = parseBrokerNumber(field(record, "marketvalue", "currentvalue", "mostrecentvalue", "value"));
+    if (!Number.isFinite(quantity) || quantity === 0) return [];
+    const type = nativeFormat
+      ? field(record, "type") || inferInstrumentType(symbol, description)
+      : inferInstrumentType(symbol, description, field(record, "type", "securitytype"));
+    const defaults = riskDefaults(type, symbol, description);
+    const multiplier = nativeFormat
+      ? parseBrokerNumber(field(record, "multiplier")) || defaults.multiplier
+      : defaults.multiplier;
+    const marketValue = Number.isFinite(suppliedValue) && suppliedValue !== 0
+      ? Math.abs(suppliedValue)
+      : Math.abs(quantity * price * multiplier);
+    const position: Position = {
+      id: `import-${index}-${symbol}`,
+      symbol,
+      type,
+      quantity,
+      price: Number.isFinite(price) ? price : marketValue / Math.abs(quantity * multiplier),
+      multiplier,
+      marketValue,
+      volatility: nativeFormat ? parseBrokerNumber(field(record, "volatility")) : defaults.volatility,
+      beta: nativeFormat ? parseBrokerNumber(field(record, "beta")) : defaults.beta,
+      delta: nativeFormat ? parseBrokerNumber(field(record, "delta")) : defaults.delta,
+    };
+    if (Object.values(position).some((value) => typeof value === "number" && !Number.isFinite(value))) {
+      throw new Error(`Invalid values on CSV row ${headerIndex + index + 2}.`);
+    }
+    return [position];
+  });
+  if (!positions.length) throw new Error("The CSV did not contain any supported investment positions.");
+  return positions;
+}
+
+function parseCsvRows(text: string) {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let value = "";
+  let quoted = false;
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index];
+    if (character === '"') {
+      if (quoted && text[index + 1] === '"') {
+        value += '"';
+        index += 1;
+      } else quoted = !quoted;
+    } else if (character === "," && !quoted) {
+      row.push(value.trim());
+      value = "";
+    } else if ((character === "\n" || character === "\r") && !quoted) {
+      if (character === "\r" && text[index + 1] === "\n") index += 1;
+      row.push(value.trim());
+      if (row.some(Boolean)) rows.push(row);
+      row = [];
+      value = "";
+    } else value += character;
+  }
+  row.push(value.trim());
+  if (row.some(Boolean)) rows.push(row);
+  return rows;
+}
+
+function normalizeHeader(value: string) {
+  return value.replace(/^\uFEFF/, "").toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function field(record: Record<string, string>, ...names: string[]) {
+  return names.map((name) => record[normalizeHeader(name)]).find((value) => value?.trim()) ?? "";
+}
+
+function parseBrokerNumber(value: string) {
+  const normalized = value.trim()
+    .replace(/^\((.*)\)$/, "-$1")
+    .replace(/[$,%+\s]/g, "")
+    .replace(/--?$/, "");
+  return normalized ? Number(normalized) : Number.NaN;
+}
+
+function inferInstrumentType(symbol: string, description: string, suppliedType = "") {
+  const context = `${symbol} ${description} ${suppliedType}`.toLowerCase();
+  const option = /\b(call|put|option)\b/.test(context) ||
+    /[a-z]{1,6}\d{6}[cp]\d{8}$/i.test(symbol.replace(/\s/g, ""));
+  if (option) {
+    if (/\b(treasury|bond|tlt|ief|shy|iei)\b/.test(context)) return "Bond Option";
+    if (/\b(etf|spy|qqq|schd|tlt|ief|shy|iei)\b/.test(context)) return "ETF Option";
+    return "Stock Option";
+  }
+  if (/\b(treasury|treasury note|treasury bond|fixed income|bond)\b/.test(context)) return "Bond";
+  if (/\b(mutual fund|fund shares)\b/.test(context) || /^[A-Z]{5}$/.test(symbol)) return "Mutual Fund";
+  if (/\b(etf|exchange traded)\b/.test(context) || /^(SPY|QQQ|SCHD|TLT|IEF|SHY|IEI)$/i.test(symbol)) return "ETF";
+  return "Stock";
+}
+
+function riskDefaults(type: string, symbol: string, description: string) {
+  const isPut = /\bput\b/i.test(`${symbol} ${description}`) ||
+    /\d{6}p\d{8}$/i.test(symbol.replace(/\s/g, ""));
+  if (type === "Bond Option") return { multiplier: 100, volatility: 0.25, beta: -0.12, delta: isPut ? -0.3 : 0.3 };
+  if (type.endsWith("Option")) return { multiplier: 100, volatility: 0.45, beta: 1, delta: isPut ? -0.35 : 0.35 };
+  if (type === "Bond") return { multiplier: 1, volatility: 0.07, beta: -0.1, delta: 1 };
+  if (type === "Mutual Fund") return { multiplier: 1, volatility: 0.16, beta: 0.75, delta: 1 };
+  if (type === "ETF") return { multiplier: 1, volatility: 0.2, beta: 1, delta: 1 };
+  return { multiplier: 1, volatility: 0.3, beta: 1, delta: 1 };
 }

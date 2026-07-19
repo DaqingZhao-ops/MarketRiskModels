@@ -166,7 +166,7 @@ export function RiskWorkbench() {
     try {
       const parsed = parsePositionsCsv(await file.text());
       setPositions(parsed);
-      setMessage(`${parsed.length} positions imported from ${file.name}.`);
+      setMessage(`${parsed.length} positions imported from ${file.name}. Broker files use estimated risk sensitivities.`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to import CSV.");
     }
@@ -245,7 +245,7 @@ export function RiskWorkbench() {
           </select>
         </div>
         <label className="upload">
-          Import CSV
+          Import Schwab, Fidelity, or app CSV
           <input type="file" accept=".csv,text/csv" onChange={importCsv} />
         </label>
       </section>
