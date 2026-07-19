@@ -115,3 +115,12 @@ test("ships the requested default share quantities", async () => {
   assert.match(csv, /^IEF P90,ETF Option,/m);
   assert.match(csv, /^UST10Y,Bond,/m);
 });
+
+test("uses four compact market-index columns on desktop", async () => {
+  const css = await readFile(
+    new URL("../app/globals.css", import.meta.url),
+    "utf8",
+  );
+  assert.match(css, /\.market-indicators\s*\{[^}]*grid-template-columns:\s*repeat\(4,\s*1fr\)/);
+  assert.match(css, /\.market-indicators article strong\s*\{[^}]*font-size:\s*21px/);
+});
