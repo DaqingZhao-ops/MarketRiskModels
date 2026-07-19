@@ -1,6 +1,6 @@
 "use client";
 
-import { ChangeEvent, useEffect, useMemo, useState } from "react";
+import { ChangeEvent, DragEvent, KeyboardEvent, useEffect, useMemo, useState } from "react";
 import {
   DEFAULT_POSITIONS,
   HistoricalData,
@@ -61,6 +61,24 @@ type PortfolioVersion = {
   archivedAt: string | null;
   isDefault: boolean;
   positions: Position[];
+};
+
+type SortField =
+  | "symbol"
+  | "type"
+  | "quantity"
+  | "price"
+  | "marketPrice"
+  | "multiplier"
+  | "marketValue"
+  | "volatility"
+  | "beta"
+  | "delta"
+  | "riskSource";
+
+type PositionSort = {
+  field: SortField;
+  direction: "asc" | "desc";
 };
 
 const MODEL_COPY: Record<ModelKind, { label: string; note: string }> = {
@@ -161,6 +179,10 @@ export function RiskWorkbench() {
   const [rateModelLoaded, setRateModelLoaded] = useState(false);
   const [rateModelStatus, setRateModelStatus] = useState("Loading stored calibration…");
   const [refreshingRateModel, setRefreshingRateModel] = useState(false);
+  const [positionSort, setPositionSort] = useState<PositionSort>();
+  const [manualPositionOrder, setManualPositionOrder] = useState(false);
+  const [selectedPositionId, setSelectedPositionId] = useState<string>();
+  const [draggedPositionId, setDraggedPositionId] = useState<string>();
 
   useEffect(() => {
     const controller = new AbortController();
@@ -297,15 +319,76 @@ export function RiskWorkbench() {
     [positions, history],
   );
   const displayedPositions = useMemo(
-    () => positions
-      .map((position, index) => ({ position, index }))
-      .sort((left, right) =>
-        riskSourceOrder[left.position.riskSource ?? "sample"] -
-          riskSourceOrder[right.position.riskSource ?? "sample"] ||
-        left.index - right.index)
-      .map(({ position }) => position),
-    [positions],
+    () => {
+      if (positionSort) {
+        const direction = positionSort.direction === "asc" ? 1 : -1;
+        return [...positions].sort((left, right) => {
+          const leftValue = left[positionSort.field] ?? "";
+          const rightValue = right[positionSort.field] ?? "";
+          const comparison = typeof leftValue === "number" && typeof rightValue === "number"
+            ? leftValue - rightValue
+            : String(leftValue).localeCompare(String(rightValue), undefined, {
+                numeric: true,
+                sensitivity: "base",
+              });
+          return comparison * direction || left.symbol.localeCompare(right.symbol);
+        });
+      }
+      if (manualPositionOrder) return positions;
+      return positions
+        .map((position, index) => ({ position, index }))
+        .sort((left, right) =>
+          riskSourceOrder[left.position.riskSource ?? "sample"] -
+            riskSourceOrder[right.position.riskSource ?? "sample"] ||
+          left.index - right.index)
+        .map(({ position }) => position);
+    },
+    [manualPositionOrder, positionSort, positions],
   );
+
+  function togglePositionSort(field: SortField) {
+    setPositionSort((current) => current?.field === field
+      ? { field, direction: current.direction === "asc" ? "desc" : "asc" }
+      : { field, direction: "asc" });
+  }
+
+  function sortLabel(label: string, field: SortField) {
+    const active = positionSort?.field === field;
+    return (
+      <button
+        className={`sort-header ${active ? "sort-header-active" : ""}`}
+        onClick={() => togglePositionSort(field)}
+        aria-label={`Sort by ${label}${active ? `, currently ${positionSort.direction}ending` : ""}`}
+      >
+        {label}
+        <span aria-hidden="true">{active ? (positionSort.direction === "asc" ? "↑" : "↓") : "↕"}</span>
+      </button>
+    );
+  }
+
+  function movePosition(targetId: string) {
+    if (!draggedPositionId || draggedPositionId === targetId) return;
+    const ordered = [...displayedPositions];
+    const fromIndex = ordered.findIndex((position) => position.id === draggedPositionId);
+    const targetIndex = ordered.findIndex((position) => position.id === targetId);
+    if (fromIndex < 0 || targetIndex < 0) return;
+    const [moved] = ordered.splice(fromIndex, 1);
+    ordered.splice(targetIndex, 0, moved);
+    setPositions(ordered);
+    setPositionSort(undefined);
+    setManualPositionOrder(true);
+    setSelectedPositionId(draggedPositionId);
+    setDraggedPositionId(undefined);
+  }
+
+  function selectPositionFromKeyboard(
+    event: KeyboardEvent<HTMLTableRowElement>,
+    positionId: string,
+  ) {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    setSelectedPositionId(positionId);
+  }
 
   function updatePosition(id: string, field: keyof Position, raw: string) {
     setPositions((current) =>
@@ -731,22 +814,24 @@ export function RiskWorkbench() {
           <table>
             <thead>
               <tr>
-                <th>Symbol</th>
-                <th>Instrument</th>
-                <th>Quantity</th>
-                <th>Unit price</th>
-                <th>Market price</th>
-                <th>Multiplier</th>
-                <th>Market value</th>
-                <th>Annual vol.</th>
-                <th>Beta</th>
-                <th>Delta</th>
-                <th>Risk source</th>
+                <th className="move-column" aria-label="Move position" />
+                <th aria-sort={positionSort?.field === "symbol" ? `${positionSort.direction}ending` : "none"}>{sortLabel("Symbol", "symbol")}</th>
+                <th aria-sort={positionSort?.field === "type" ? `${positionSort.direction}ending` : "none"}>{sortLabel("Instrument", "type")}</th>
+                <th aria-sort={positionSort?.field === "quantity" ? `${positionSort.direction}ending` : "none"}>{sortLabel("Quantity", "quantity")}</th>
+                <th aria-sort={positionSort?.field === "price" ? `${positionSort.direction}ending` : "none"}>{sortLabel("Unit price", "price")}</th>
+                <th aria-sort={positionSort?.field === "marketPrice" ? `${positionSort.direction}ending` : "none"}>{sortLabel("Market price", "marketPrice")}</th>
+                <th aria-sort={positionSort?.field === "multiplier" ? `${positionSort.direction}ending` : "none"}>{sortLabel("Multiplier", "multiplier")}</th>
+                <th aria-sort={positionSort?.field === "marketValue" ? `${positionSort.direction}ending` : "none"}>{sortLabel("Market value", "marketValue")}</th>
+                <th aria-sort={positionSort?.field === "volatility" ? `${positionSort.direction}ending` : "none"}>{sortLabel("Annual vol.", "volatility")}</th>
+                <th aria-sort={positionSort?.field === "beta" ? `${positionSort.direction}ending` : "none"}>{sortLabel("Beta", "beta")}</th>
+                <th aria-sort={positionSort?.field === "delta" ? `${positionSort.direction}ending` : "none"}>{sortLabel("Delta", "delta")}</th>
+                <th aria-sort={positionSort?.field === "riskSource" ? `${positionSort.direction}ending` : "none"}>{sortLabel("Risk source", "riskSource")}</th>
                 <th aria-label="Actions" />
               </tr>
             </thead>
             <tbody>
               <tr className="position-draft">
+                <td className="move-column" />
                 <td><input aria-label="New position symbol" placeholder="Symbol" value={positionDraft.symbol} onChange={(event) => setPositionDraft({ ...positionDraft, symbol: event.target.value.toUpperCase() })} /></td>
                 <td>
                   <select aria-label="New position instrument type" value={positionDraft.type} onChange={(event) => setPositionDraft({ ...positionDraft, type: event.target.value })}>
@@ -769,7 +854,35 @@ export function RiskWorkbench() {
                 <td><button className="add-row" onClick={addDraftPosition}>Add</button></td>
               </tr>
               {displayedPositions.map((position) => (
-                <tr key={position.id}>
+                <tr
+                  key={position.id}
+                  className={[
+                    selectedPositionId === position.id ? "position-selected" : "",
+                    draggedPositionId === position.id ? "position-dragging" : "",
+                  ].filter(Boolean).join(" ")}
+                  aria-selected={selectedPositionId === position.id}
+                  tabIndex={0}
+                  onClick={() => setSelectedPositionId(position.id)}
+                  onKeyDown={(event) => selectPositionFromKeyboard(event, position.id)}
+                  onDragOver={(event) => event.preventDefault()}
+                  onDrop={() => movePosition(position.id)}
+                >
+                  <td className="move-column">
+                    <button
+                      className="drag-handle"
+                      draggable
+                      aria-label={`Drag to move ${position.symbol}`}
+                      title="Drag to reorder"
+                      onDragStart={(event: DragEvent<HTMLButtonElement>) => {
+                        event.dataTransfer.effectAllowed = "move";
+                        event.dataTransfer.setData("text/plain", position.id);
+                        setDraggedPositionId(position.id);
+                      }}
+                      onDragEnd={() => setDraggedPositionId(undefined)}
+                    >
+                      ⠿
+                    </button>
+                  </td>
                   <td><input aria-label={`${position.symbol} symbol`} value={position.symbol} onChange={(e) => updatePosition(position.id, "symbol", e.target.value.toUpperCase())} /></td>
                   <td>
                     <select aria-label={`${position.symbol} instrument type`} value={position.type} onChange={(e) => updatePosition(position.id, "type", e.target.value)}>
@@ -829,6 +942,9 @@ export function RiskWorkbench() {
           </table>
         </div>
         <p className="table-note">
+          Click a column heading to sort; click a row to select it. Drag the
+          handle at the left edge to create a manual row order.
+          {" "}
           CSV columns: symbol, type, quantity, price, multiplier, marketValue,
           volatility, beta, delta. Market value is quantity × unit price ×
           multiplier; option contracts use 100. Sample prices and option
