@@ -34,6 +34,8 @@ test("server-renders the market risk workbench", async () => {
   assert.match(html, /Historical simulation/);
   assert.match(html, /Expected shortfall/);
   assert.match(html, /Positions &amp; sensitivities/);
+  assert.match(html, /Risk source/);
+  assert.match(html, /Sample/);
   assert.match(html, /Important limitation/);
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton/i);
 });

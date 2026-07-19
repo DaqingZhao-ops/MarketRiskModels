@@ -160,6 +160,11 @@ td { padding: 10px 9px; border-top: 1px solid var(--line); }
 td input, td select { width: 100%; min-width: 84px; border: 1px solid transparent; padding: 8px; background: transparent; color: var(--ink); font-size: 11px; }
 td input:focus, td select:focus { outline: none; border-color: #88a99b; background: white; }
 .remove { width: 28px; height: 28px; border: 0; background: transparent; color: #a46858; font-size: 18px; }
+.risk-source { display: inline-block; min-width: 72px; padding: 6px 8px; border-radius: 999px; background: #ecece7; color: #59645f; text-align: center; white-space: nowrap; font: 9px var(--font-geist-mono); }
+.risk-source-historical { background: #dcece3; color: #285f48; }
+.risk-source-historical-pending { background: #eee8d6; color: #765f22; }
+.risk-source-fallback { background: #f3dfda; color: #884c3e; }
+.risk-source-provided { background: #e2e8ee; color: #3f5f78; }
 .secondary { background: transparent; border-color: #95a99f; }
 .table-note { margin: 0; padding: 14px 25px; border-top: 1px solid var(--line); color: var(--muted); font-size: 10px; }
 

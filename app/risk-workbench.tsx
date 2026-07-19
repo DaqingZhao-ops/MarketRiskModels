@@ -23,6 +23,13 @@ const percent = new Intl.NumberFormat("en-US", {
   maximumFractionDigits: 1,
 });
 
+const riskSourceLabels = {
+  provided: "Provided",
+  "historical-pending": "Calculating…",
+  historical: "Historical",
+  fallback: "Fallback",
+} as const;
+
 const MODEL_COPY: Record<ModelKind, { label: string; note: string }> = {
   historical: {
     label: "Historical simulation",
@@ -374,6 +381,7 @@ export function RiskWorkbench() {
                   volatility: 0.25,
                   beta: 1,
                   delta: 1,
+                  riskSource: "provided",
                 },
               ])
             }
@@ -394,6 +402,7 @@ export function RiskWorkbench() {
                 <th>Annual vol.</th>
                 <th>Beta</th>
                 <th>Delta</th>
+                <th>Risk source</th>
                 <th aria-label="Actions" />
               </tr>
             </thead>
@@ -413,6 +422,24 @@ export function RiskWorkbench() {
                   <td><input aria-label={`${position.symbol} volatility`} type="number" min="0" step="0.01" value={position.volatility} onChange={(e) => updatePosition(position.id, "volatility", e.target.value)} /></td>
                   <td><input aria-label={`${position.symbol} beta`} type="number" step="0.1" value={position.beta} onChange={(e) => updatePosition(position.id, "beta", e.target.value)} /></td>
                   <td><input aria-label={`${position.symbol} delta`} type="number" step="0.05" value={position.delta} onChange={(e) => updatePosition(position.id, "delta", e.target.value)} /></td>
+                  <td>
+                    <span
+                      className={`risk-source risk-source-${position.riskSource ?? "sample"}`}
+                      title={
+                        position.riskSource === "historical"
+                          ? "Calculated from historical adjusted-close returns"
+                          : position.riskSource === "fallback"
+                            ? "Estimated because sufficient history was unavailable"
+                            : position.riskSource === "provided"
+                              ? "Supplied by the file or edited by the user"
+                              : position.riskSource === "historical-pending"
+                                ? "Waiting for historical market data"
+                                : "Illustrative assumption in the default sample portfolio"
+                      }
+                    >
+                      {position.riskSource ? riskSourceLabels[position.riskSource] : "Sample"}
+                    </span>
+                  </td>
                   <td><button className="remove" aria-label={`Remove ${position.symbol}`} onClick={() => setPositions((current) => current.filter((item) => item.id !== position.id))}>×</button></td>
                 </tr>
               ))}
@@ -424,6 +451,7 @@ export function RiskWorkbench() {
           volatility, beta, delta. Market value is quantity × unit price ×
           multiplier; option contracts use 100. Sample prices and option
           premiums are illustrative and editable. Delta is 1.0 for cash instruments.
+          Risk source identifies calculated, supplied, fallback, and sample values.
         </p>
       </section>
 
