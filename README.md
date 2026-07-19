@@ -76,6 +76,11 @@ clearly identifies that it is using the TypeScript continuity engine.
 
 ## Portfolio CSV
 
+Portfolio defaults and version history are stored durably in the hosted D1
+database. Adding a position archives the previous default with a timestamp and
+promotes the updated portfolio to the new default. Archived versions can be
+selected and restored from the position-table header.
+
 The default portfolio contains the requested AAPL, AMZN, GOOG, META, MSFT,
 BABA, NVDA, INTC, COST, KLAC, SPY, SCHD, and FAGIX share quantities, plus
 representative equity options, Treasury exposures, and Treasury options.

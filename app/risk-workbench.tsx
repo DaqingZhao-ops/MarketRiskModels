@@ -51,6 +51,14 @@ const emptyPositionDraft = {
   delta: "",
 };
 
+type PortfolioVersion = {
+  id: string;
+  createdAt: string;
+  archivedAt: string | null;
+  isDefault: boolean;
+  positions: Position[];
+};
+
 const MODEL_COPY: Record<ModelKind, { label: string; note: string }> = {
   historical: {
     label: "Historical simulation",
@@ -142,6 +150,38 @@ export function RiskWorkbench() {
   const [remoteResult, setRemoteResult] = useState<RiskResult>();
   const [engineStatus, setEngineStatus] = useState("Connecting to Python engine…");
   const [positionDraft, setPositionDraft] = useState(emptyPositionDraft);
+  const [portfolioVersions, setPortfolioVersions] = useState<PortfolioVersion[]>([]);
+  const [selectedVersionId, setSelectedVersionId] = useState("");
+  const [portfolioSaveStatus, setPortfolioSaveStatus] = useState("Loading saved default…");
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetch("/api/portfolios", { signal: controller.signal })
+      .then(async (response) => {
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.error ?? "Unable to load saved portfolios.");
+        const versions = payload.versions as PortfolioVersion[];
+        setPortfolioVersions(versions);
+        const savedDefault = versions.find((version) => version.isDefault);
+        if (savedDefault) {
+          setPositions(savedDefault.positions.map((position) => ({
+            ...position,
+            marketPrice: undefined,
+            marketPriceAt: undefined,
+            marketPriceSource: undefined,
+            riskSource: position.riskSource === "provided" ? "provided" : "historical-pending",
+          })));
+          setPortfolioSaveStatus(`Saved default from ${new Date(savedDefault.createdAt).toLocaleString()}.`);
+        } else {
+          setPortfolioSaveStatus("Built-in default loaded. It will be archived after the first addition.");
+        }
+      })
+      .catch((error) => {
+        if (controller.signal.aborted) return;
+        setPortfolioSaveStatus(error instanceof Error ? error.message : "Unable to load saved portfolios.");
+      });
+    return () => controller.abort();
+  }, []);
 
   const symbolsKey = useMemo(
     () => [...new Set([
@@ -256,7 +296,21 @@ export function RiskWorkbench() {
     );
   }
 
-  function addDraftPosition() {
+  async function saveDefault(nextPositions: Position[], previousPositions: Position[]) {
+    const response = await fetch("/api/portfolios", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ positions: nextPositions, previousPositions }),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error ?? "Unable to save the portfolio default.");
+    const versions = payload.versions as PortfolioVersion[];
+    setPortfolioVersions(versions);
+    setSelectedVersionId("");
+    return versions.find((version) => version.isDefault);
+  }
+
+  async function addDraftPosition() {
     const symbol = positionDraft.symbol.trim().toUpperCase();
     const quantity = Number(positionDraft.quantity);
     const price = Number(positionDraft.price);
@@ -268,8 +322,8 @@ export function RiskWorkbench() {
     }
     const hasRiskFactors = [positionDraft.volatility, positionDraft.beta, positionDraft.delta]
       .every((value) => value.trim() !== "" && Number.isFinite(Number(value)));
-    setPositions((current) => [
-      ...current,
+    const nextPositions: Position[] = [
+      ...positions,
       {
         id: crypto.randomUUID(),
         symbol,
@@ -283,9 +337,34 @@ export function RiskWorkbench() {
         delta: hasRiskFactors ? Number(positionDraft.delta) : 1,
         riskSource: hasRiskFactors ? "provided" : "historical-pending",
       },
-    ]);
-    setPositionDraft(emptyPositionDraft);
-    setMessage(`${symbol} added. ${hasRiskFactors ? "Provided risk factors retained." : "Calculating risk factors from history."}`);
+    ];
+    setPortfolioSaveStatus("Saving new default and archiving the previous version…");
+    try {
+      const savedDefault = await saveDefault(nextPositions, positions);
+      setPositions(nextPositions);
+      setPositionDraft(emptyPositionDraft);
+      setPortfolioSaveStatus(`New default saved ${savedDefault ? new Date(savedDefault.createdAt).toLocaleString() : ""}.`);
+      setMessage(`${symbol} added. ${hasRiskFactors ? "Provided risk factors retained." : "Calculating risk factors from history."}`);
+    } catch (error) {
+      setPortfolioSaveStatus(error instanceof Error ? error.message : "Unable to save the portfolio default.");
+    }
+  }
+
+  async function restorePortfolioVersion() {
+    const selected = portfolioVersions.find((version) => version.id === selectedVersionId);
+    if (!selected) return;
+    setPortfolioSaveStatus("Restoring selected portfolio as the new default…");
+    try {
+      const restored = selected.positions.map((position) => ({
+        ...position,
+        riskSource: position.riskSource === "provided" ? "provided" as const : "historical-pending" as const,
+      }));
+      const savedDefault = await saveDefault(restored, positions);
+      setPositions(restored);
+      setPortfolioSaveStatus(`Restored as new default ${savedDefault ? new Date(savedDefault.createdAt).toLocaleString() : ""}.`);
+    } catch (error) {
+      setPortfolioSaveStatus(error instanceof Error ? error.message : "Unable to restore the portfolio.");
+    }
   }
 
   async function importCsv(event: ChangeEvent<HTMLInputElement>) {
@@ -531,8 +610,25 @@ export function RiskWorkbench() {
             <p className="eyebrow">Portfolio input</p>
             <h2>Positions & sensitivities</h2>
           </div>
-          <span className="model-pill">Enter a new position in the first row</span>
+          <div className="portfolio-history">
+            <select
+              aria-label="Saved portfolio history"
+              value={selectedVersionId}
+              onChange={(event) => setSelectedVersionId(event.target.value)}
+            >
+              <option value="">Saved portfolio history</option>
+              {portfolioVersions.filter((version) => !version.isDefault).map((version) => (
+                <option key={version.id} value={version.id}>
+                  {new Date(version.archivedAt ?? version.createdAt).toLocaleString()} · {version.positions.length} positions
+                </option>
+              ))}
+            </select>
+            <button className="secondary" disabled={!selectedVersionId} onClick={restorePortfolioVersion}>
+              Restore
+            </button>
+          </div>
         </div>
+        <p className="portfolio-save-status" role="status">{portfolioSaveStatus}</p>
         <div className="table-wrap">
           <table>
             <thead>
