@@ -21,6 +21,7 @@ type PortfolioRow = {
   created_at: string;
   archived_at: string | null;
   positions_json: string;
+  source_name: string;
   is_default: number;
 };
 
@@ -34,6 +35,12 @@ async function ensureSchema(db: D1Database) {
     db.prepare(createPortfolioVersionsTable),
     db.prepare(createPortfolioVersionsIndex),
   ]);
+  const columns = await db.prepare("PRAGMA table_info(portfolio_versions)").all<{ name: string }>();
+  if (!(columns.results ?? []).some((column) => column.name === "source_name")) {
+    await db.prepare(
+      "ALTER TABLE portfolio_versions ADD COLUMN source_name TEXT NOT NULL DEFAULT 'Saved portfolio'",
+    ).run();
+  }
 }
 
 function serialize(row: PortfolioRow) {
@@ -41,6 +48,7 @@ function serialize(row: PortfolioRow) {
     id: row.id,
     createdAt: row.created_at,
     archivedAt: row.archived_at,
+    sourceName: row.source_name,
     isDefault: row.is_default === 1,
     positions: JSON.parse(row.positions_json) as Position[],
   };
@@ -48,7 +56,7 @@ function serialize(row: PortfolioRow) {
 
 async function listVersions(db: D1Database) {
   const response = await db.prepare(`
-    SELECT id, created_at, archived_at, positions_json, is_default
+    SELECT id, created_at, archived_at, positions_json, source_name, is_default
     FROM portfolio_versions
     ORDER BY is_default DESC, COALESCE(archived_at, created_at) DESC
     LIMIT 50
@@ -66,6 +74,7 @@ export async function POST(request: Request) {
   const payload = await request.json() as {
     previousPositions?: Position[];
     positions?: Position[];
+    sourceName?: string;
   };
   if (!Array.isArray(payload.positions) || !payload.positions.length) {
     return NextResponse.json({ error: "A non-empty portfolio is required." }, { status: 400 });
@@ -74,7 +83,7 @@ export async function POST(request: Request) {
   await ensureSchema(db);
   const now = new Date().toISOString();
   const current = await db.prepare(`
-    SELECT id, created_at, archived_at, positions_json, is_default
+    SELECT id, created_at, archived_at, positions_json, source_name, is_default
     FROM portfolio_versions WHERE is_default = 1 LIMIT 1
   `).all<PortfolioRow>();
   const statements: D1Statement[] = [];
@@ -88,17 +97,22 @@ export async function POST(request: Request) {
     statements.push(
       db.prepare(`
         INSERT INTO portfolio_versions
-          (id, created_at, archived_at, positions_json, is_default)
-        VALUES (?, ?, ?, ?, 0)
-      `).bind(crypto.randomUUID(), now, now, JSON.stringify(payload.previousPositions)),
+          (id, created_at, archived_at, positions_json, source_name, is_default)
+        VALUES (?, ?, ?, ?, ?, 0)
+      `).bind(crypto.randomUUID(), now, now, JSON.stringify(payload.previousPositions), "Built-in default"),
     );
   }
   statements.push(
     db.prepare(`
       INSERT INTO portfolio_versions
-        (id, created_at, archived_at, positions_json, is_default)
-      VALUES (?, ?, NULL, ?, 1)
-    `).bind(crypto.randomUUID(), now, JSON.stringify(payload.positions)),
+        (id, created_at, archived_at, positions_json, source_name, is_default)
+      VALUES (?, ?, NULL, ?, ?, 1)
+    `).bind(
+      crypto.randomUUID(),
+      now,
+      JSON.stringify(payload.positions),
+      payload.sourceName?.trim() || "Saved portfolio",
+    ),
   );
   await db.batch(statements);
   return NextResponse.json({ versions: await listVersions(db) });

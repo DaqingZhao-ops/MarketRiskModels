@@ -4,6 +4,7 @@ export const createPortfolioVersionsTable = `
     created_at TEXT NOT NULL,
     archived_at TEXT,
     positions_json TEXT NOT NULL,
+    source_name TEXT NOT NULL DEFAULT 'Saved portfolio',
     is_default INTEGER NOT NULL DEFAULT 0
   )
 `;

@@ -59,6 +59,7 @@ type PortfolioVersion = {
   id: string;
   createdAt: string;
   archivedAt: string | null;
+  sourceName: string;
   isDefault: boolean;
   positions: Position[];
 };
@@ -443,11 +444,15 @@ export function RiskWorkbench() {
     );
   }
 
-  async function saveDefault(nextPositions: Position[], previousPositions: Position[]) {
+  async function saveDefault(
+    nextPositions: Position[],
+    previousPositions: Position[],
+    sourceName = "Edited portfolio",
+  ) {
     const response = await fetch("/api/portfolios", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ positions: nextPositions, previousPositions }),
+      body: JSON.stringify({ positions: nextPositions, previousPositions, sourceName }),
     });
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.error ?? "Unable to save the portfolio default.");
@@ -506,7 +511,7 @@ export function RiskWorkbench() {
         ...position,
         riskSource: position.riskSource === "provided" ? "provided" as const : "historical-pending" as const,
       }));
-      const savedDefault = await saveDefault(restored, positions);
+      const savedDefault = await saveDefault(restored, positions, selected.sourceName);
       setPositions(restored);
       setPortfolioSaveStatus(`Restored as new default ${savedDefault ? new Date(savedDefault.createdAt).toLocaleString() : ""}.`);
     } catch (error) {
@@ -541,11 +546,24 @@ export function RiskWorkbench() {
     const file = event.target.files?.[0];
     if (!file) return;
     setImportStatus(`Reading ${file.name}…`);
+    let parsed: Position[];
     try {
-      const parsed = parsePositionsCsv(await file.text());
-      setImportStatus(`Imported ${parsed.length} positions. Saving as the new default…`);
-      const savedDefault = await saveDefault(parsed, positions);
-      setPositions(parsed);
+      parsed = parsePositionsCsv(await file.text());
+    } catch (error) {
+      const failure = error instanceof Error ? error.message : "Unable to import CSV.";
+      setImportStatus(`Import failed: ${failure}`);
+      setMessage(failure);
+      event.target.value = "";
+      return;
+    }
+
+    setPositions(parsed);
+    setManualPositionOrder(false);
+    setPositionSort(undefined);
+    setImportStatus(`Imported ${parsed.length} positions. Saving as the new default…`);
+    try {
+      const savedDefault = await saveDefault(parsed, positions, file.name);
+      if (savedDefault) setSelectedVersionId(savedDefault.id);
       setPortfolioSaveStatus(
         `Imported default saved ${savedDefault ? new Date(savedDefault.createdAt).toLocaleString() : ""}.`,
       );
@@ -554,8 +572,10 @@ export function RiskWorkbench() {
       setMessage(confirmation);
     } catch (error) {
       const failure = error instanceof Error ? error.message : "Unable to import CSV.";
-      setImportStatus(`Import failed: ${failure}`);
-      setMessage(failure);
+      setImportStatus(
+        `${parsed.length} positions are displayed, but could not be saved as the default: ${failure}`,
+      );
+      setMessage(`Imported positions are displayed, but persistence failed: ${failure}`);
     }
     event.target.value = "";
   }
@@ -881,19 +901,26 @@ export function RiskWorkbench() {
           </div>
           <div className="portfolio-history">
             <select
-              aria-label="Saved portfolio history"
+              aria-label="Position source files"
               value={selectedVersionId}
               onChange={(event) => setSelectedVersionId(event.target.value)}
             >
-              <option value="">Saved portfolio history</option>
-              {portfolioVersions.filter((version) => !version.isDefault).map((version) => (
+              <option value="">Position source files</option>
+              {portfolioVersions.map((version) => (
                 <option key={version.id} value={version.id}>
-                  {new Date(version.archivedAt ?? version.createdAt).toLocaleString()} · {version.positions.length} positions
+                  {version.sourceName}{version.isDefault ? " · current default" : ""} ·{" "}
+                  {new Date(version.archivedAt ?? version.createdAt).toLocaleString()} ·{" "}
+                  {version.positions.length} positions
                 </option>
               ))}
             </select>
-            <button className="secondary" disabled={!selectedVersionId} onClick={restorePortfolioVersion}>
-              Restore
+            <button
+              className="secondary"
+              disabled={!selectedVersionId ||
+                portfolioVersions.find((version) => version.id === selectedVersionId)?.isDefault}
+              onClick={restorePortfolioVersion}
+            >
+              Use as default
             </button>
           </div>
         </div>

@@ -40,8 +40,8 @@ test("server-renders the market risk workbench", async () => {
   assert.match(html, /Positions &amp; sensitivities/);
   assert.match(html, /New position symbol/);
   assert.match(html, />Add<\/button>/);
-  assert.match(html, /Saved portfolio history/);
-  assert.match(html, />Restore<\/button>/);
+  assert.match(html, /Position source files/);
+  assert.match(html, />Use as default<\/button>/);
   assert.match(html, /Market price/);
   assert.match(html, /Unavailable/);
   assert.match(html, /Black–Scholes fallback/);
