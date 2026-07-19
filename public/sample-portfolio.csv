@@ -1,0 +1,7 @@
+symbol,type,marketValue,volatility,beta,delta
+AAPL,Stock,240000,0.29,1.18,1
+SPY,ETF,310000,0.18,1,1
+VBTLX,Mutual Fund,180000,0.055,0.08,1
+UST10Y,Bond,225000,0.075,-0.12,1
+AAPL C200,Stock Option,46000,0.46,1.25,0.62
+TLT P90,Bond Option,29000,0.34,-0.18,-0.41
