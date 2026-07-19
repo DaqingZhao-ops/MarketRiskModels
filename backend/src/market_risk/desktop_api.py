@@ -55,6 +55,8 @@ def parse_market_indicator(
     price = float(meta["regularMarketPrice"])
     previous = float(meta.get("chartPreviousClose") or meta.get("previousClose") or price)
     change = price - previous
+    closes = result.get("indicators", {}).get("quote", [{}])[0].get("close", [])
+    trend = [float(value) for value in closes if value is not None and math.isfinite(float(value))]
     return {
         "label": label,
         "symbol": symbol,
@@ -67,6 +69,7 @@ def parse_market_indicator(
             int(meta.get("regularMarketTime") or datetime.now(timezone.utc).timestamp()),
             timezone.utc,
         ).isoformat(),
+        "trend": trend[-30:],
     }
 
 
@@ -91,7 +94,7 @@ async def market_briefing() -> dict[str, Any]:
             try:
                 response = await client.get(
                     f"https://query1.finance.yahoo.com/v8/finance/chart/{quote(symbol, safe='')}",
-                    params={"interval": "1m", "range": "1d"},
+                    params={"interval": "1d", "range": "1mo"},
                 )
                 response.raise_for_status()
                 return parse_market_indicator(label, symbol, unit, response.json())

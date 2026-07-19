@@ -21,6 +21,7 @@ def test_parses_market_briefing_quotes_and_headlines() -> None:
                         "regularMarketTime": 1784480400,
                         "marketState": "REGULAR",
                     },
+                    "indicators": {"quote": [{"close": [6400, None, 6450, 6500]}]},
                 }],
             },
         },
@@ -28,6 +29,7 @@ def test_parses_market_briefing_quotes_and_headlines() -> None:
     assert quote["change"] == 50
     assert quote["percentChange"] == 50 / 6450
     assert quote["marketState"] == "REGULAR"
+    assert quote["trend"] == [6400, 6450, 6500]
 
     headlines = desktop_api.parse_yahoo_headlines("""
         <rss><channel>

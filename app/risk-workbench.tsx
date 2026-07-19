@@ -78,6 +78,7 @@ type MarketBriefing = {
     unit: "index" | "percent" | "fx" | "gold" | "oil";
     marketState: string;
     asOf: string;
+    trend: number[];
   }>;
   headlines: Array<{ title: string; url: string; publishedAt: string }>;
   warnings: string[];
@@ -102,6 +103,31 @@ type PositionSort = {
   field: SortField;
   direction: "asc" | "desc";
 };
+
+function MarketSparkline({ values }: { values: number[] }) {
+  if (values.length < 2) return <span className="market-sparkline-empty">Trend unavailable</span>;
+  const width = 92;
+  const height = 32;
+  const minimum = Math.min(...values);
+  const maximum = Math.max(...values);
+  const range = maximum - minimum || 1;
+  const points = values.map((value, index) => {
+    const x = index / (values.length - 1) * width;
+    const y = height - 3 - (value - minimum) / range * (height - 6);
+    return `${x.toFixed(2)},${y.toFixed(2)}`;
+  }).join(" ");
+  const rising = values.at(-1)! >= values[0];
+  return (
+    <svg
+      className={`market-sparkline ${rising ? "market-sparkline-up" : "market-sparkline-down"}`}
+      viewBox={`0 0 ${width} ${height}`}
+      role="img"
+      aria-label={`30-day trend ${rising ? "up" : "down"}`}
+    >
+      <polyline points={points} fill="none" vectorEffect="non-scaling-stroke" />
+    </svg>
+  );
+}
 
 const MODEL_COPY: Record<ModelKind, { label: string; note: string }> = {
   historical: {
@@ -766,6 +792,7 @@ export function RiskWorkbench() {
                         ? `$${indicator.value.toFixed(2)}/bbl`
                         : indicator.value.toLocaleString("en-US", { maximumFractionDigits: 2 })}
               </strong>
+              <MarketSparkline values={indicator.trend} />
               <small className={indicator.change >= 0 ? "market-up" : "market-down"}>
                 {indicator.change >= 0 ? "+" : ""}
                 {indicator.unit === "percent"
