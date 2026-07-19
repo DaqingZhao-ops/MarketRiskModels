@@ -632,7 +632,7 @@ export function RiskWorkbench() {
           multiplier; option contracts use 100. Sample prices and option
           premiums remain illustrative when no exact tradable identifier is available.
           Stock, ETF, and mutual-fund prices refresh from the latest market feed.
-          Stock options without quotes use a labeled Black–Scholes fallback;
+          Stock and ETF options without quotes use a labeled Black–Scholes fallback;
           simplified option symbols assume 90 days to expiration.
           Delta is 1.0 for cash instruments.
           Risk source identifies calculated, supplied, fallback, and sample values.

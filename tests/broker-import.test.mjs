@@ -110,6 +110,38 @@ test("uses a labeled Black-Scholes fallback for simplified stock options", () =>
   assert.ok(enriched.delta > 0 && enriched.delta < 1);
 });
 
+test("uses the Black-Scholes fallback for SPY ETF options", () => {
+  const dates = Array.from({ length: 61 }, (_, index) =>
+    new Date(Date.UTC(2026, 0, index + 1)).toISOString().slice(0, 10));
+  const adjustedClose = Array.from({ length: 61 }, (_, index) =>
+    620 * (1 + index * 0.0004 + Math.sin(index) * 0.006));
+  const option = {
+    id: "spy-put",
+    symbol: "SPY P600",
+    type: "ETF Option",
+    quantity: 10,
+    price: 11,
+    multiplier: 100,
+    marketValue: 11000,
+    volatility: 0.3,
+    beta: 1,
+    delta: -0.3,
+    riskSource: "historical-pending",
+  };
+  const [enriched] = enrichPositionsWithHistoricalRisk([option], {
+    source: "test",
+    fetchedAt: "2026-03-02T00:00:00Z",
+    mappings: { "SPY P600": "SPY", SPY: "SPY" },
+    series: [
+      { symbol: "SPY P600", sourceSymbol: "SPY", dates, adjustedClose, latestPrice: 625, latestPriceAt: "2026-03-02T21:00:00Z" },
+      { symbol: "SPY", sourceSymbol: "SPY", dates, adjustedClose, latestPrice: 625 },
+    ],
+  }, new Date("2026-03-02T00:00:00Z"));
+  assert.equal(enriched.marketPriceSource, "black-scholes");
+  assert.ok(enriched.marketPrice > 0);
+  assert.ok(enriched.delta < 0 && enriched.delta > -1);
+});
+
 test("builds an efficient frontier and locates the current portfolio", () => {
   const dates = Array.from({ length: 91 }, (_, index) =>
     new Date(Date.UTC(2025, 0, index + 1)).toISOString().slice(0, 10));

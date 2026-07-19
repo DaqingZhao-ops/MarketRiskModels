@@ -126,7 +126,7 @@ export function enrichPositionsWithHistoricalRisk(
     const canRefreshPrice = ["Stock", "ETF", "Mutual Fund"].includes(position.type) &&
       typeof series.latestPrice === "number" && Number.isFinite(series.latestPrice) &&
       series.latestPrice > 0;
-    const modeledOptionPrice = position.type === "Stock Option"
+    const modeledOptionPrice = ["Stock Option", "ETF Option"].includes(position.type)
       ? blackScholesPrice(position.symbol, underlyingPrice, volatility, asOf)
       : undefined;
     const hasModeledOptionPrice = typeof modeledOptionPrice === "number" &&
