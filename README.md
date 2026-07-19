@@ -34,6 +34,7 @@ See [docs/architecture.md](docs/architecture.md) and
 - Position-level contributions
 - Historical efficient frontier with the current delta-adjusted portfolio marked
 - One-day and ten-day horizons at 95%, 97.5%, and 99% confidence
+- Selectable, independently persisted Hull–White 1F and G2++ 2F Treasury models
 
 The Python historical engine stores up to four years of Yahoo Finance adjusted
 daily closes in the development database. It aligns observations by trading

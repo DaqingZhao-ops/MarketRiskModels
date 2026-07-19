@@ -9,6 +9,7 @@ import {
 } from "../lib/risk.ts";
 import {
   fitHullWhiteCurve,
+  fitG2Curve,
   hullWhiteBondOption,
   hullWhiteDiscountFactor,
   isHullWhiteStale,
@@ -386,4 +387,20 @@ test("prices zero-coupon bond options with Hull-White dynamics", () => {
   assert.ok(Math.abs(
     (call.price - put.price) - (bondDiscount - 0.65 * optionDiscount),
   ) < 1e-10);
+});
+
+test("prices bond options with saved G2++ two-factor dynamics", () => {
+  const calibration = fitG2Curve([
+    { maturity: 0.25, yield: 0.04 },
+    { maturity: 1, yield: 0.041 },
+    { maturity: 5, yield: 0.043 },
+    { maturity: 10, yield: 0.045 },
+  ], "2026-07-17T00:00:00Z");
+  assert.equal(calibration.model, "G2++ 2F");
+  assert.equal(calibration.secondFactorMeanReversion, 0.3);
+  assert.equal(calibration.factorCorrelation, -0.7);
+  const option = hullWhiteBondOption(calibration, 0.25, 10, 0.65, "C");
+  assert.ok(option);
+  assert.ok(option.price >= 0);
+  assert.ok(option.priceVolatility > 0);
 });

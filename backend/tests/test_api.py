@@ -3,6 +3,7 @@ from sqlalchemy import func, select
 
 from market_risk.api import app
 from market_risk.database import SessionLocal
+from market_risk import desktop_api
 from market_risk.models import RiskRun
 
 
@@ -92,3 +93,44 @@ def test_desktop_portfolio_api_versions_and_updates_default() -> None:
         listed = client.get("/api/v1/portfolios")
         assert listed.status_code == 200
         assert len(listed.json()["versions"]) == 1
+
+
+def test_saves_hull_white_and_g2_calibrations_independently(monkeypatch) -> None:
+    async def fake_calibration(model: str) -> dict:
+        return {
+            "id": f"id-{model}",
+            "model": model,
+            "version": "1.0",
+            "curveDate": "2026-07-19T00:00:00+00:00",
+            "calibratedAt": "2026-07-19T12:00:00+00:00",
+            "meanReversion": 0.1 if model == "G2++ 2F" else 0.03,
+            "volatility": 0.01,
+            "secondFactorMeanReversion": 0.3 if model == "G2++ 2F" else None,
+            "secondFactorVolatility": 0.015 if model == "G2++ 2F" else None,
+            "factorCorrelation": -0.7 if model == "G2++ 2F" else None,
+            "parameterSource": "governed-default",
+            "curveSource": "test",
+            "curve": [
+                {"maturity": 1, "yield": 0.04, "discountFactor": 0.96},
+                {"maturity": 2, "yield": 0.041, "discountFactor": 0.92},
+                {"maturity": 5, "yield": 0.043, "discountFactor": 0.81},
+                {"maturity": 10, "yield": 0.045, "discountFactor": 0.64},
+            ],
+            "fitRmse": 0,
+            "status": "valid",
+        }
+
+    monkeypatch.setattr(desktop_api, "treasury_calibration", fake_calibration)
+    with TestClient(app) as client:
+        hull_white = client.post("/api/v1/rates", params={"model": "Hull-White 1F"})
+        g2 = client.post("/api/v1/rates", params={"model": "G2++ 2F"})
+        assert hull_white.status_code == 200
+        assert g2.status_code == 200
+        assert hull_white.json()["calibration"]["model"] == "Hull-White 1F"
+        assert g2.json()["calibration"]["model"] == "G2++ 2F"
+        assert g2.json()["calibration"]["factorCorrelation"] == -0.7
+
+        saved_hull_white = client.get("/api/v1/rates", params={"model": "Hull-White 1F"})
+        saved_g2 = client.get("/api/v1/rates", params={"model": "G2++ 2F"})
+        assert saved_hull_white.json()["calibration"]["id"] == "id-Hull-White 1F"
+        assert saved_g2.json()["calibration"]["id"] == "id-G2++ 2F"

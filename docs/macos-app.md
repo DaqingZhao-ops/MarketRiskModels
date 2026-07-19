@@ -15,6 +15,11 @@ Internet access is used for Yahoo Finance price/history requests and the
 official U.S. Treasury yield curve. Portfolio data and calculation audit data
 remain on the Mac.
 
+The interest-rate pane supports both Hull–White one factor and G2++ two factor.
+Each model keeps its own latest saved calibration in SQLite. G2++ adds a second
+mean-reverting factor and negative factor correlation so level and slope curve
+movements can be represented separately.
+
 ## Build
 
 ```bash

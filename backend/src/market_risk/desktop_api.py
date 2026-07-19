@@ -6,7 +6,7 @@ from uuid import uuid4
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .config import Settings, get_settings
@@ -125,7 +125,12 @@ async def market_history(
     }
 
 
-async def treasury_calibration() -> dict[str, Any]:
+RATE_MODELS = {"Hull-White 1F", "G2++ 2F"}
+
+
+async def treasury_calibration(model: str) -> dict[str, Any]:
+    if model not in RATE_MODELS:
+        raise ValueError(f"Unsupported interest-rate model: {model}")
     now = datetime.now(timezone.utc)
     month = now.strftime("%Y%m")
     url = "https://home.treasury.gov/resource-center/data-chart-center/interest-rates/pages/xml"
@@ -159,9 +164,9 @@ async def treasury_calibration() -> dict[str, Any]:
     if len(curve) < 4:
         raise ValueError("The Treasury curve has too few valid maturity points.")
     date_match = re.search(r"<d:NEW_DATE[^>]*>([^<]+)</d:NEW_DATE>", latest, re.IGNORECASE)
-    return {
+    calibration = {
         "id": str(uuid4()),
-        "model": "Hull-White 1F",
+        "model": model,
         "version": "1.0",
         "curveDate": date_match.group(1) if date_match else now.isoformat(),
         "calibratedAt": now.isoformat(),
@@ -173,13 +178,19 @@ async def treasury_calibration() -> dict[str, Any]:
         "fitRmse": 0,
         "status": "valid",
     }
+    if model == "G2++ 2F":
+        calibration.update({
+            "meanReversion": 0.10,
+            "volatility": 0.01,
+            "secondFactorMeanReversion": 0.30,
+            "secondFactorVolatility": 0.015,
+            "factorCorrelation": -0.70,
+        })
+    return calibration
 
 
-async def refresh_rate_calibration(session: Session) -> dict[str, Any]:
-    calibration = await treasury_calibration()
-    session.execute(update(RateCalibration).where(
-        RateCalibration.is_active.is_(True),
-    ).values(is_active=False))
+async def refresh_rate_calibration(session: Session, model: str) -> dict[str, Any]:
+    calibration = await treasury_calibration(model)
     session.add(RateCalibration(
         id=calibration["id"],
         calibrated_at=datetime.fromisoformat(calibration["calibratedAt"]),
@@ -191,11 +202,19 @@ async def refresh_rate_calibration(session: Session) -> dict[str, Any]:
 
 
 @router.get("/rates")
-async def get_rates(session: SessionDependency) -> dict[str, Any]:
-    stored = session.scalar(select(RateCalibration).where(
-        RateCalibration.is_active.is_(True),
-    ).order_by(RateCalibration.calibrated_at.desc()))
-    calibration = stored.payload if stored else await refresh_rate_calibration(session)
+async def get_rates(
+    session: SessionDependency,
+    model: str = Query(default="Hull-White 1F"),
+) -> dict[str, Any]:
+    if model not in RATE_MODELS:
+        raise HTTPException(status_code=422, detail=f"Unsupported interest-rate model: {model}")
+    stored = next((
+        item for item in session.scalars(
+            select(RateCalibration).order_by(RateCalibration.calibrated_at.desc()),
+        )
+        if item.payload.get("model") == model
+    ), None)
+    calibration = stored.payload if stored else await refresh_rate_calibration(session, model)
     calibrated = datetime.fromisoformat(calibration["calibratedAt"])
     if calibrated.tzinfo is None:
         calibrated = calibrated.replace(tzinfo=timezone.utc)
@@ -204,8 +223,14 @@ async def get_rates(session: SessionDependency) -> dict[str, Any]:
 
 
 @router.post("/rates")
-async def refresh_rates(session: SessionDependency) -> dict[str, Any]:
+async def refresh_rates(
+    session: SessionDependency,
+    model: str = Query(default="Hull-White 1F"),
+) -> dict[str, Any]:
     try:
-        return {"calibration": await refresh_rate_calibration(session), "stale": False}
+        return {
+            "calibration": await refresh_rate_calibration(session, model),
+            "stale": False,
+        }
     except Exception as error:
         raise HTTPException(status_code=502, detail=str(error)) from error

@@ -15,6 +15,7 @@ import {
 } from "../lib/risk";
 import {
   type HullWhiteCalibration,
+  type RateModelName,
   isHullWhiteStale,
 } from "../lib/hull-white";
 import { apiUrl } from "../lib/api-client";
@@ -204,6 +205,7 @@ export function RiskWorkbench() {
   const [selectedVersionId, setSelectedVersionId] = useState("");
   const [portfolioSaveStatus, setPortfolioSaveStatus] = useState("Loading saved default…");
   const [rateCalibration, setRateCalibration] = useState<HullWhiteCalibration>();
+  const [selectedRateModel, setSelectedRateModel] = useState<RateModelName>("Hull-White 1F");
   const [rateModelLoaded, setRateModelLoaded] = useState(false);
   const [rateModelStatus, setRateModelStatus] = useState("Loading stored calibration…");
   const [refreshingRateModel, setRefreshingRateModel] = useState(false);
@@ -247,7 +249,9 @@ export function RiskWorkbench() {
 
   useEffect(() => {
     const controller = new AbortController();
-    void fetch(apiUrl("/api/rates"), { signal: controller.signal })
+    void fetch(apiUrl(`/api/rates?model=${encodeURIComponent(selectedRateModel)}`), {
+      signal: controller.signal,
+    })
       .then(async (response) => {
         const payload = await response.json();
         if (!response.ok) throw new Error(payload.error ?? "Unable to load the interest-rate model.");
@@ -264,7 +268,7 @@ export function RiskWorkbench() {
         if (!controller.signal.aborted) setRateModelLoaded(true);
       });
     return () => controller.abort();
-  }, []);
+  }, [selectedRateModel]);
 
   const symbolsKey = useMemo(
     () => [...new Set([
@@ -550,16 +554,19 @@ export function RiskWorkbench() {
     setRefreshingRateModel(true);
     setRateModelStatus("Refreshing the Treasury curve and storing a new calibration…");
     try {
-      const response = await fetch(apiUrl("/api/rates"), { method: "POST" });
+      const response = await fetch(
+        apiUrl(`/api/rates?model=${encodeURIComponent(selectedRateModel)}`),
+        { method: "POST" },
+      );
       const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error ?? "Unable to refresh Hull–White calibration.");
+      if (!response.ok) throw new Error(payload.error ?? `Unable to refresh ${selectedRateModel} calibration.`);
       const calibration = payload.calibration as HullWhiteCalibration;
       setRateCalibration(calibration);
       setPositions((current) => current.map((position) =>
         position.type === "Bond" && position.riskSource !== "provided"
           ? { ...position, riskSource: "historical-pending" as const }
           : position));
-      setRateModelStatus("New calibration stored successfully.");
+      setRateModelStatus(`New ${selectedRateModel} calibration stored successfully.`);
     } catch (error) {
       setRateModelStatus(
         `${error instanceof Error ? error.message : "Refresh failed."} The last valid calibration remains active.`,
@@ -726,12 +733,26 @@ export function RiskWorkbench() {
       <section className="rate-model" aria-labelledby="rate-model-title">
         <div>
           <p className="eyebrow">Interest-rate model</p>
-          <h2 id="rate-model-title">Hull–White one factor</h2>
+          <h2 id="rate-model-title">{selectedRateModel}</h2>
           <p>
-            The stored model fits the observed Treasury term structure. Mean
-            reversion and volatility remain governed defaults until option-implied
-            volatility calibration is connected.
+            {selectedRateModel === "G2++ 2F"
+              ? "Two correlated mean-reverting factors represent level and slope movements while fitting the observed Treasury curve."
+              : "One mean-reverting factor fits the observed Treasury curve with a transparent governed parameter set."}
           </p>
+          <label htmlFor="rate-model-select">Interest-rate model</label>
+          <select
+            id="rate-model-select"
+            value={selectedRateModel}
+            onChange={(event) => {
+              const nextModel = event.target.value as RateModelName;
+              setRateModelLoaded(false);
+              setRateModelStatus(`Loading saved ${nextModel} calibration…`);
+              setSelectedRateModel(nextModel);
+            }}
+          >
+            <option value="Hull-White 1F">Hull–White one factor</option>
+            <option value="G2++ 2F">G2++ two factor</option>
+          </select>
         </div>
         {rateCalibration ? (
           <dl>
@@ -739,6 +760,13 @@ export function RiskWorkbench() {
             <div><dt>Calibrated</dt><dd>{new Date(rateCalibration.calibratedAt).toLocaleString()}</dd></div>
             <div><dt>Mean reversion (a)</dt><dd>{percent.format(rateCalibration.meanReversion)}</dd></div>
             <div><dt>Volatility (σ)</dt><dd>{percent.format(rateCalibration.volatility)}</dd></div>
+            {rateCalibration.model === "G2++ 2F" ? (
+              <>
+                <div><dt>Second mean reversion (b)</dt><dd>{percent.format(rateCalibration.secondFactorMeanReversion ?? 0)}</dd></div>
+                <div><dt>Second volatility (η)</dt><dd>{percent.format(rateCalibration.secondFactorVolatility ?? 0)}</dd></div>
+                <div><dt>Factor correlation (ρ)</dt><dd>{(rateCalibration.factorCorrelation ?? 0).toFixed(2)}</dd></div>
+              </>
+            ) : null}
             <div><dt>Curve nodes</dt><dd>{rateCalibration.curve.length}</dd></div>
             <div><dt>Parameter source</dt><dd>Governed default</dd></div>
           </dl>
@@ -749,7 +777,7 @@ export function RiskWorkbench() {
             onClick={refreshRateModel}
             disabled={refreshingRateModel}
           >
-            {refreshingRateModel ? "Refreshing…" : "Refresh Hull–White model"}
+            {refreshingRateModel ? "Refreshing…" : `Refresh ${selectedRateModel}`}
           </button>
           <small className={rateCalibration && isHullWhiteStale(rateCalibration) ? "stale" : ""}>
             {rateModelStatus}
@@ -1069,9 +1097,9 @@ export function RiskWorkbench() {
                           position.marketPriceSource === "black-scholes"
                             ? "Black–Scholes fallback"
                             : position.marketPriceSource === "hull-white"
-                              ? "Hull–White option"
+                              ? `${rateCalibration?.model ?? "Rate model"} option`
                             : position.marketPriceSource === "treasury-curve"
-                              ? "Hull–White curve"
+                              ? `${rateCalibration?.model ?? "Rate model"} curve`
                               : "Market quote"
                         }</em>
                         <small>{position.marketPriceAt
@@ -1122,7 +1150,7 @@ export function RiskWorkbench() {
           Stock, ETF, and mutual-fund prices refresh from the latest market feed.
           Stock and ETF options without quotes use a labeled Black–Scholes fallback;
           simplified option symbols assume 90 days to expiration.
-          Generic Treasury rows use the stored Hull–White initial discount curve;
+          Generic Treasury rows use the selected stored interest-rate model’s initial discount curve;
           mean reversion and volatility are retained for rate scenarios and
           fixed-income option pricing.
           Delta is 1.0 for cash instruments.
@@ -1134,7 +1162,7 @@ export function RiskWorkbench() {
         <p className="eyebrow">Model governance</p>
         <h2>Every number should explain itself.</h2>
         <div>
-          <article><span>01</span><h3>Exposure mapping</h3><p>Options use delta-adjusted exposure. Treasury prices use the persisted Hull–White initial curve; historical ETF proxies currently supply bond return risk.</p></article>
+          <article><span>01</span><h3>Exposure mapping</h3><p>Options use delta-adjusted exposure. Treasury prices use the selected persisted rate-model curve; historical ETF proxies currently supply bond return risk.</p></article>
           <article><span>02</span><h3>Dependence</h3><p>Correlations are produced from a one-factor market structure, repaired to positive definiteness, then decomposed by Cholesky.</p></article>
           <article><span>03</span><h3>Tail measurement</h3><p>VaR is a loss quantile. Expected Shortfall is the mean of losses beyond that quantile and remains visible for every model.</p></article>
         </div>
