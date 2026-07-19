@@ -69,6 +69,27 @@ Account Total,,,,,"$23,700.00",
   );
 });
 
+test("imports Schwab compound headers from the Individual Positions export", () => {
+  const csv = `"Positions for account Individual ...258 as of 02:14 PM ET, 2026/07/19"
+
+"Symbol","Description","Price","Qty (Quantity)","Price Chng % (Price Change %)","Mkt Val (Market Value)","Asset Type",
+"EFX","EQUIFAX INC","177.08","100","-1.41%","$17,708.00","Equity",
+"SPY","STATE STREET SPDR S&P 500 ETF TRUST","743.29","368","-0.99%","$273,530.72","ETFs & Closed End Funds",
+"VGHCX","VANGUARD HEALTH CARE INV","203.83","1,050.568","-0.47%","$214,137.28","Mutual Fund",
+"SWVXX","SCHWAB PRIME ADVANTAGE MONEY INVESTOR","1.00","8,025.15","0%","$8,025.15","Cash and Money Market",
+`;
+  const positions = parsePositionsCsv(csv);
+  assert.deepEqual(
+    positions.map(({ symbol, quantity, marketValue, type }) =>
+      ({ symbol, quantity, marketValue, type })),
+    [
+      { symbol: "EFX", quantity: 100, marketValue: 17708, type: "Stock" },
+      { symbol: "SPY", quantity: 368, marketValue: 273530.72, type: "ETF" },
+      { symbol: "VGHCX", quantity: 1050.568, marketValue: 214137.28, type: "Mutual Fund" },
+    ],
+  );
+});
+
 test("continues to import the native app format", () => {
   const csv = `symbol,type,quantity,price,multiplier,marketValue,volatility,beta,delta
 AAPL,Stock,100,220,1,22000,0.29,1.18,1`;
