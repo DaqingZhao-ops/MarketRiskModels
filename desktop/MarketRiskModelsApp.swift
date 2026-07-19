@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import UniformTypeIdentifiers
 import WebKit
 
 struct LauncherConfig: Decodable {
@@ -7,7 +8,7 @@ struct LauncherConfig: Decodable {
     let nodeBin: String
 }
 
-final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDelegate {
     private var window: NSWindow!
     private var webView: WKWebView!
     private var statusLabel: NSTextField!
@@ -52,6 +53,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
         configuration.websiteDataStore = .default()
         webView = WKWebView(frame: frame, configuration: configuration)
         webView.navigationDelegate = self
+        webView.uiDelegate = self
         webView.autoresizingMask = [.width, .height]
 
         statusLabel = NSTextField(labelWithString: "Starting local risk services…")
@@ -184,6 +186,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
             if process.isRunning {
                 kill(process.processIdentifier, SIGKILL)
             }
+        }
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        runOpenPanelWith parameters: WKOpenPanelParameters,
+        initiatedByFrame frame: WKFrameInfo,
+        completionHandler: @escaping ([URL]?) -> Void
+    ) {
+        let panel = NSOpenPanel()
+        panel.title = "Choose a portfolio CSV"
+        panel.prompt = "Choose"
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = parameters.allowsMultipleSelection
+        panel.allowedContentTypes = [.commaSeparatedText]
+        panel.beginSheetModal(for: window) { response in
+            completionHandler(response == .OK ? panel.urls : nil)
         }
     }
 }
