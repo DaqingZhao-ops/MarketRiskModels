@@ -1,4 +1,5 @@
-const backendBase = process.env.NEXT_PUBLIC_RISK_API_URL?.replace(/\/$/, "") ?? "";
+const configuredBackendBase =
+  process.env.NEXT_PUBLIC_RISK_API_URL?.replace(/\/$/, "") ?? "";
 
 const desktopPaths: Record<string, string> = {
   "/api/history": "/api/v1/market/history",
@@ -11,6 +12,11 @@ const desktopPaths: Record<string, string> = {
 };
 
 export function apiUrl(path: string) {
+  const desktopBackendBase =
+    typeof window !== "undefined" && window.location.hostname === "127.0.0.1"
+      ? "http://127.0.0.1:8000"
+      : "";
+  const backendBase = configuredBackendBase || desktopBackendBase;
   if (!backendBase) return path;
   const [pathname, query] = path.split("?", 2);
   const mapped = desktopPaths[pathname] ?? pathname;
