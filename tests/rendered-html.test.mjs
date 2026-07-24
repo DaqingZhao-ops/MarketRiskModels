@@ -124,5 +124,5 @@ test("uses four compact market-index columns on desktop", async () => {
     "utf8",
   );
   assert.match(css, /\.market-indicators\s*\{[^}]*grid-template-columns:\s*repeat\(4,\s*1fr\)/);
-  assert.match(css, /\.market-indicators article strong\s*\{[^}]*font-size:\s*21px/);
+  assert.match(css, /\.market-indicators article strong\s*\{[^}]*font-size:\s*18px/);
 });

@@ -82,6 +82,7 @@ def test_health_and_parametric_risk_are_audited() -> None:
         assert payload["engine"] == "Python"
         assert payload["runId"] >= 1
         assert payload["var"] > 0
+        assert len(payload["portfolioKey"]) == 16
 
     with SessionLocal() as session:
         assert session.scalar(select(func.count()).select_from(RiskRun)) == 1
@@ -107,6 +108,75 @@ def test_rejects_unsupported_horizon() -> None:
     with TestClient(app) as client:
         response = client.post("/api/v1/risk/calculate", json=request)
     assert response.status_code == 422
+
+
+def test_risk_history_returns_comparable_normalized_and_component_trends() -> None:
+    base_position = {
+        "id": "trend-position",
+        "symbol": "TREND",
+        "type": "Stock",
+        "quantity": 10,
+        "marketValue": 1000,
+        "beta": 1,
+        "delta": 1,
+    }
+    with TestClient(app) as client:
+        for volatility in (0.2, 0.3):
+            response = client.post("/api/v1/risk/calculate", json={
+                "positions": [{**base_position, "volatility": volatility}],
+                "model": "parametric",
+                "confidence": 0.975,
+                "horizon": 1,
+            })
+            assert response.status_code == 200
+        history = client.get(
+            "/api/v1/risk/history",
+            params={
+                "model": "parametric",
+                "confidence": 0.975,
+                "horizon": 1,
+                "frequency": "all",
+            },
+        )
+    assert history.status_code == 200
+    points = history.json()["points"]
+    assert history.json()["excludedInvalidPoints"] == 0
+    assert len(points) == 2
+    assert points[1]["var"] > points[0]["var"]
+    assert points[1]["varPercent"] == points[1]["var"] / points[1]["marketValue"]
+    assert points[1]["contributions"][0]["symbol"] == "TREND"
+    assert points[1]["contributions"][0]["change"] > 0
+
+
+def test_risk_history_filters_portfolio_and_uses_latest_daily_run() -> None:
+    with TestClient(app) as client:
+        first = client.post("/api/v1/risk/calculate", json={
+            "positions": [{
+                "id": "first", "symbol": "AAA", "type": "Stock",
+                "quantity": 10, "marketValue": 1000, "volatility": 0.2,
+                "beta": 1, "delta": 1,
+            }],
+            "model": "parametric", "confidence": 0.96, "horizon": 1,
+        }).json()
+        client.post("/api/v1/risk/calculate", json={
+            "positions": [{
+                "id": "second", "symbol": "BBB", "type": "Stock",
+                "quantity": 20, "marketValue": 2000, "volatility": 0.3,
+                "beta": 1, "delta": 1,
+            }],
+            "model": "parametric", "confidence": 0.96, "horizon": 1,
+        })
+        history = client.get("/api/v1/risk/history", params={
+            "model": "parametric",
+            "confidence": 0.96,
+            "horizon": 1,
+            "portfolio": first["portfolioKey"],
+        })
+    payload = history.json()
+    assert payload["frequency"] == "daily"
+    assert payload["portfolioKey"] == first["portfolioKey"]
+    assert len(payload["points"]) == 1
+    assert payload["points"][0]["contributions"][0]["symbol"] == "AAA"
 
 
 def test_desktop_portfolio_api_versions_and_updates_default() -> None:

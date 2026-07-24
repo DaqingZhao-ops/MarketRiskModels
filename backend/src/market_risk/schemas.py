@@ -30,7 +30,8 @@ class Position(ApiModel):
     quantity: float = 0
     price: float = 0
     multiplier: float = 1
-    market_value: float
+    # Position value is a magnitude; quantity carries long/short direction.
+    market_value: float = Field(ge=0)
     volatility: float = Field(ge=0)
     beta: float
     delta: float
@@ -42,6 +43,11 @@ class RiskRequest(ApiModel):
     confidence: float = Field(gt=0.5, lt=1)
     horizon: int = Field(default=1)
     refresh_market_data: bool = False
+
+
+class BackcastRequest(RiskRequest):
+    days: int = Field(default=30, ge=5, le=250)
+    lookback: int = Field(default=252, ge=60, le=1000)
 
 
 class Contribution(Position):
@@ -62,6 +68,9 @@ class RiskResult(ApiModel):
     contributions: list[Contribution]
     history_start: date | None = None
     history_end: date | None = None
+    var_floor: float | None = None
+    var_floor_applied: bool = False
+    portfolio_key: str | None = None
     engine: str = "Python"
     run_id: int | None = None
 

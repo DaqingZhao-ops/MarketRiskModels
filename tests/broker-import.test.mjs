@@ -354,6 +354,36 @@ test("negative quantities reverse directional risk exposure", () => {
   assert.ok(hedged.dailyVolatility < unhedged.dailyVolatility);
 });
 
+test("historical risk uses a volatility floor when every observed scenario is a gain", () => {
+  const position = {
+    id: "risky",
+    symbol: "RISK",
+    type: "Stock",
+    quantity: 10,
+    price: 100,
+    multiplier: 1,
+    marketValue: 1000,
+    volatility: 0.3,
+    beta: 1,
+    delta: 1,
+  };
+  const result = calculateRisk([position], "historical", 0.99, 1, {
+    source: "test",
+    fetchedAt: "2026-01-04",
+    mappings: { RISK: "RISK" },
+    series: [{
+      symbol: "RISK",
+      sourceSymbol: "RISK",
+      dates: ["2026-01-01", "2026-01-02", "2026-01-03", "2026-01-04"],
+      adjustedClose: [100, 101, 102, 103],
+    }],
+  });
+  assert.ok(result.var > 0);
+  assert.ok(result.expectedShortfall > result.var);
+  assert.equal(result.varFloorApplied, true);
+  assert.equal(result.var, result.varFloor);
+});
+
 test("same symbol held in multiple accounts aggregates as one market risk factor", () => {
   const shared = {
     symbol: "AAPL",
@@ -410,6 +440,42 @@ test("calculates portfolio alpha and beta against synchronized SPY returns", () 
   assert.ok(stats);
   assert.ok(Math.abs(stats.beta - 1.5) < 1e-10);
   assert.ok(Math.abs(stats.alpha - 0.0002 * 252) < 1e-10);
+  assert.equal(stats.observations, 60);
+});
+
+test("portfolio alpha and beta reverse sign for an explicit short position", () => {
+  const dates = Array.from({ length: 61 }, (_, index) =>
+    new Date(Date.UTC(2025, 0, index + 1)).toISOString().slice(0, 10));
+  const spy = dates.map((_, index) => 100 * Math.exp(index * 0.001 + Math.sin(index) * 0.004));
+  const asset = [100];
+  for (let index = 1; index < dates.length; index += 1) {
+    const marketReturn = spy[index] / spy[index - 1] - 1;
+    asset.push(asset.at(-1) * (1 + 0.0002 + 1.5 * marketReturn));
+  }
+  const stats = calculatePortfolioAlphaBeta([{
+    id: "short-asset",
+    symbol: "AAA",
+    type: "Stock",
+    quantity: -10,
+    price: 100,
+    multiplier: 1,
+    marketValue: 1000,
+    volatility: 0.2,
+    beta: 1.5,
+    delta: 1,
+  }], {
+    source: "test",
+    fetchedAt: "2026-01-01",
+    mappings: { AAA: "AAA", SPY: "SPY" },
+    series: [
+      { symbol: "AAA", sourceSymbol: "AAA", dates, adjustedClose: asset },
+      { symbol: "SPY", sourceSymbol: "SPY", dates, adjustedClose: spy },
+    ],
+  });
+
+  assert.ok(stats);
+  assert.ok(Math.abs(stats.beta + 1.5) < 1e-10);
+  assert.ok(Math.abs(stats.alpha + 0.0002 * 252) < 1e-10);
   assert.equal(stats.observations, 60);
 });
 

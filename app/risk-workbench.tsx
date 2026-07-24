@@ -88,6 +88,45 @@ type MarketBriefing = {
   disclosures: string[];
 };
 
+type RiskTrendContribution = {
+  symbol: string;
+  amount: number;
+  share: number;
+  change: number | null;
+  changePercent: number | null;
+};
+
+type RiskTrendPoint = {
+  runId: number;
+  timestamp: string;
+  marketValue: number;
+  var: number;
+  varPercent: number;
+  expectedShortfall: number;
+  dailyVolatility: number;
+  portfolioBeta?: number;
+  contributions: RiskTrendContribution[];
+};
+
+type RiskTrend = {
+  model: ModelKind;
+  confidence: number;
+  horizon: number;
+  portfolioKey: string | null;
+  frequency: "daily" | "all";
+  points: RiskTrendPoint[];
+  excludedInvalidPoints: number;
+};
+
+type BackcastTrend = {
+  mode: "fixedPortfolioBackcast";
+  days: number;
+  lookback: number;
+  asOf: string;
+  points: RiskTrendPoint[];
+  assumptions: string[];
+};
+
 type SortField =
   | "account"
   | "symbol"
@@ -233,6 +272,88 @@ function EfficientFrontierChart({ data }: { data: EfficientFrontierResult }) {
   );
 }
 
+function RiskTrendChart({ points }: { points: RiskTrendPoint[] }) {
+  const width = 760;
+  const height = 250;
+  const margin = { top: 18, right: 28, bottom: 34, left: 70 };
+  const maxVar = Math.max(...points.map((point) => point.var), 1);
+  const maxPercent = Math.max(...points.map((point) => point.varPercent), 0.0001);
+  const x = (index: number) => margin.left +
+    index / Math.max(points.length - 1, 1) * (width - margin.left - margin.right);
+  const yVar = (value: number) => height - margin.bottom -
+    value / maxVar * (height - margin.top - margin.bottom);
+  const yPercent = (value: number) => height - margin.bottom -
+    value / maxPercent * (height - margin.top - margin.bottom);
+  const path = (values: number[], y: (value: number) => number) =>
+    values.map((value, index) =>
+      `${index ? "L" : "M"} ${x(index).toFixed(1)} ${y(value).toFixed(1)}`).join(" ");
+  return (
+    <svg className="risk-trend-chart" viewBox={`0 0 ${width} ${height}`} role="img">
+      <title>Portfolio value at risk trend</title>
+      <desc>Dollar value at risk and value at risk as a percentage of gross market value over persisted calculations.</desc>
+      {[0, 0.5, 1].map((fraction) => {
+        const y = height - margin.bottom -
+          fraction * (height - margin.top - margin.bottom);
+        return (
+          <g key={fraction}>
+            <line x1={margin.left} y1={y} x2={width - margin.right} y2={y} className="risk-trend-grid" />
+            <text x={margin.left - 10} y={y + 3} textAnchor="end">
+              {money.format(maxVar * fraction)}
+            </text>
+          </g>
+        );
+      })}
+      <path d={path(points.map((point) => point.var), yVar)} className="risk-trend-var" />
+      <path d={path(points.map((point) => point.varPercent), yPercent)} className="risk-trend-percent" />
+      <text x={margin.left} y={height - 10}>
+        {new Date(points[0].timestamp).toLocaleDateString()}
+      </text>
+      <text x={width - margin.right} y={height - 10} textAnchor="end">
+        {new Date(points.at(-1)!.timestamp).toLocaleDateString()}
+      </text>
+    </svg>
+  );
+}
+
+function PortfolioBetaChart({ points }: { points: RiskTrendPoint[] }) {
+  const width = 760;
+  const height = 210;
+  const margin = { top: 18, right: 28, bottom: 34, left: 70 };
+  const values = points.map((point) => point.portfolioBeta ?? 0);
+  const observedMinimum = Math.min(...values, 1);
+  const observedMaximum = Math.max(...values, 1);
+  const padding = Math.max((observedMaximum - observedMinimum) * 0.12, 0.05);
+  const minimum = observedMinimum - padding;
+  const maximum = observedMaximum + padding;
+  const x = (index: number) => margin.left +
+    index / Math.max(points.length - 1, 1) * (width - margin.left - margin.right);
+  const y = (value: number) => margin.top +
+    (maximum - value) / (maximum - minimum) * (height - margin.top - margin.bottom);
+  const path = values.map((value, index) =>
+    `${index ? "L" : "M"} ${x(index).toFixed(1)} ${y(value).toFixed(1)}`).join(" ");
+  const ticks = [minimum, (minimum + maximum) / 2, maximum];
+  return (
+    <svg className="beta-trend-chart" viewBox={`0 0 ${width} ${height}`} role="img">
+      <title>Thirty-day fixed-portfolio beta trend</title>
+      <desc>Trailing portfolio beta against SPY for the current holdings over the prior 30 trading days.</desc>
+      {ticks.map((tick) => (
+        <g key={tick}>
+          <line x1={margin.left} y1={y(tick)} x2={width - margin.right} y2={y(tick)} className="risk-trend-grid" />
+          <text x={margin.left - 10} y={y(tick) + 3} textAnchor="end">{tick.toFixed(2)}</text>
+        </g>
+      ))}
+      <line x1={margin.left} y1={y(1)} x2={width - margin.right} y2={y(1)} className="beta-reference" />
+      <path d={path} className="beta-trend-line" />
+      <text x={margin.left} y={height - 10}>
+        {new Date(points[0].timestamp).toLocaleDateString()}
+      </text>
+      <text x={width - margin.right} y={height - 10} textAnchor="end">
+        {new Date(points.at(-1)!.timestamp).toLocaleDateString()}
+      </text>
+    </svg>
+  );
+}
+
 export function RiskWorkbench() {
   const [positions, setPositions] = useState<Position[]>(DEFAULT_POSITIONS);
   const positionsRef = useRef(positions);
@@ -250,11 +371,17 @@ export function RiskWorkbench() {
   const [marketBriefingRefreshing, setMarketBriefingRefreshing] = useState(false);
   const [historyStatus, setHistoryStatus] = useState("Loading market history…");
   const [remoteResult, setRemoteResult] = useState<RiskResult>();
+  const [riskTrend, setRiskTrend] = useState<RiskTrend>();
+  const [riskTrendStatus, setRiskTrendStatus] = useState("Waiting for persisted risk history…");
+  const [backcastTrend, setBackcastTrend] = useState<BackcastTrend>();
+  const [backcastStatus, setBackcastStatus] = useState("Calculating fixed-portfolio backcast…");
+  const [riskMonitorMode, setRiskMonitorMode] = useState<"backcast" | "actual">("backcast");
   const [engineStatus, setEngineStatus] = useState("Connecting to Python engine…");
   const [positionDraft, setPositionDraft] = useState(emptyPositionDraft);
   const [portfolioVersions, setPortfolioVersions] = useState<PortfolioVersion[]>([]);
   const [selectedVersionId, setSelectedVersionId] = useState("");
   const [portfolioSaveStatus, setPortfolioSaveStatus] = useState("Loading saved default…");
+  const [portfolioLoaded, setPortfolioLoaded] = useState(false);
   const [rateCalibration, setRateCalibration] = useState<HullWhiteCalibration>();
   const [selectedRateModel, setSelectedRateModel] = useState<RateModelName>("Hull-White 1F");
   const [rateModelLoaded, setRateModelLoaded] = useState(false);
@@ -323,6 +450,9 @@ export function RiskWorkbench() {
       .catch((error) => {
         if (controller.signal.aborted) return;
         setPortfolioSaveStatus(error instanceof Error ? error.message : "Unable to load saved portfolios.");
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setPortfolioLoaded(true);
       });
     return () => controller.abort();
   }, []);
@@ -417,6 +547,7 @@ export function RiskWorkbench() {
   );
 
   useEffect(() => {
+    if (!portfolioLoaded) return;
     const controller = new AbortController();
     const timer = window.setTimeout(async () => {
       setRemoteResult(undefined);
@@ -446,9 +577,88 @@ export function RiskWorkbench() {
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [positions, model, confidence, horizon]);
+  }, [positions, model, confidence, horizon, portfolioLoaded]);
 
   const result = remoteResult ?? continuityResult;
+  useEffect(() => {
+    if (!remoteResult?.runId) return;
+    const controller = new AbortController();
+    const params = new URLSearchParams({
+      model,
+      confidence: String(confidence),
+      horizon: String(horizon),
+      limit: "180",
+      portfolio: remoteResult.portfolioKey ?? "",
+      frequency: "daily",
+    });
+    void fetch(apiUrl(`/api/risk-history?${params}`), {
+      cache: "no-store",
+      signal: controller.signal,
+    }).then(async (response) => {
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error ?? payload.detail ?? "Risk history unavailable.");
+      setRiskTrend(payload as RiskTrend);
+      const excluded = Number(payload.excludedInvalidPoints ?? 0);
+      setRiskTrendStatus(
+        payload.points.length > 1
+          ? `${payload.points.length} comparable persisted calculations${
+              excluded ? ` · ${excluded} invalid legacy point${excluded === 1 ? "" : "s"} excluded` : ""
+            }`
+          : "One persisted calculation; trends appear after the next comparable run.",
+      );
+    }).catch((error) => {
+      if (controller.signal.aborted) return;
+      setRiskTrend(undefined);
+      setRiskTrendStatus(error instanceof Error ? error.message : "Risk history unavailable.");
+    });
+    return () => controller.abort();
+  }, [confidence, horizon, model, remoteResult?.portfolioKey, remoteResult?.runId]);
+  useEffect(() => {
+    if (!portfolioLoaded) return;
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      setBackcastStatus("Calculating fixed-portfolio backcast…");
+      void fetch(apiUrl("/api/risk-backcast"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          positions,
+          model,
+          confidence,
+          horizon,
+          days: 30,
+          lookback: 252,
+        }),
+        signal: controller.signal,
+      }).then(async (response) => {
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.error ?? payload.detail ?? "Backcast unavailable.");
+        setBackcastTrend(payload as BackcastTrend);
+        setBackcastStatus(
+          `${payload.points.length} trading-day fixed-portfolio backcast · ${payload.lookback}-day factor window`,
+        );
+      }).catch((error) => {
+        if (controller.signal.aborted) return;
+        setBackcastTrend(undefined);
+        setBackcastStatus(error instanceof Error ? error.message : "Backcast unavailable.");
+      });
+    }, 450);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [confidence, horizon, model, portfolioLoaded, positions]);
+  const activeRiskTrend = remoteResult?.runId ? riskTrend : undefined;
+  const activeRiskTrendStatus = remoteResult?.runId
+    ? riskTrendStatus
+    : "Risk trends require the Python audit service.";
+  const monitorPoints = riskMonitorMode === "backcast"
+    ? backcastTrend?.points
+    : activeRiskTrend?.points;
+  const monitorStatus = riskMonitorMode === "backcast"
+    ? backcastStatus
+    : activeRiskTrendStatus;
+  const latestRiskTrend = monitorPoints?.at(-1);
   const diagnosticWarnings = useMemo(() => {
     const warnings: string[] = [];
     const fallbackPositions = positions.filter((position) => position.riskSource === "fallback");
@@ -464,6 +674,11 @@ export function RiskWorkbench() {
     if (model === "historical" && result.observations < 250) {
       warnings.push(`Only ${result.observations.toLocaleString()} synchronized historical scenarios are available; at least 250 are preferred.`);
     }
+    if (result.varFloorApplied) {
+      warnings.push(
+        `Historical VaR was nonpositive, so the volatility-based ${money.format(result.varFloor ?? 0)} VaR floor was applied.`,
+      );
+    }
     if (rateCalibration?.fallbackUsed) {
       warnings.push(`The ${rateCalibration.model} calibration uses governed fallback parameters: ${rateCalibration.fallbackReason ?? "Treasury history was unavailable"}.`);
     }
@@ -474,7 +689,16 @@ export function RiskWorkbench() {
       warnings.push(`The rate calibration uses only ${rateCalibration.observationCount.toLocaleString()} observations.`);
     }
     return warnings;
-  }, [history, model, positions, rateCalibration, remoteResult, result.observations]);
+  }, [
+    history,
+    model,
+    positions,
+    rateCalibration,
+    remoteResult,
+    result.observations,
+    result.varFloor,
+    result.varFloorApplied,
+  ]);
   const rateFitQuality = !rateCalibration
     ? "Unavailable"
     : rateCalibration.fallbackUsed
@@ -1200,12 +1424,99 @@ export function RiskWorkbench() {
                   <strong>{item.symbol}</strong>
                   <small>{item.type}</small>
                 </div>
-                <div className="bar"><i style={{ width: `${item.share * 100}%` }} /></div>
+                <div className="bar">
+                  <i
+                    className={item.share < 0 ? "bar-hedge" : ""}
+                    style={{ width: `${Math.min(100, Math.abs(item.share) * 100)}%` }}
+                  />
+                </div>
                 <b>{percent.format(item.share)}</b>
               </div>
             ))}
           </div>
         </article>
+      </section>
+
+      <section className="risk-monitor panel" id="risk-monitor">
+        <div className="panel-heading">
+          <div>
+            <p className="eyebrow">Risk through time</p>
+            <h2>Portfolio and component VaR monitor</h2>
+          </div>
+          <div className="risk-monitor-controls">
+            <button
+              className={riskMonitorMode === "backcast" ? "active" : ""}
+              onClick={() => setRiskMonitorMode("backcast")}
+            >
+              Current portfolio · 30 days
+            </button>
+            <button
+              className={riskMonitorMode === "actual" ? "active" : ""}
+              onClick={() => setRiskMonitorMode("actual")}
+            >
+              Actual portfolio history
+            </button>
+            <span className="model-pill">{monitorStatus}</span>
+          </div>
+        </div>
+        {monitorPoints && monitorPoints.length > 1 && latestRiskTrend ? (
+          <div className="risk-monitor-grid">
+            <div>
+              <RiskTrendChart points={monitorPoints} />
+              <div className="plot-legend risk-trend-legend">
+                <span><i className="legend-line risk-trend-var-key" />Dollar VaR</span>
+                <span><i className="legend-line risk-trend-percent-key" />VaR / gross market value</span>
+              </div>
+              <p className="risk-monitor-note">
+                {riskMonitorMode === "backcast"
+                  ? `Today's quantities revalued over ${monitorPoints.length} prior trading days using only data available through each date. Option deltas are held at current values.`
+                  : `Daily closing observations for the current portfolio configuration from comparable ${MODEL_COPY[model].label.toLowerCase()} audit runs at ${percent.format(confidence)} confidence and a ${horizon}-day horizon.`}
+              </p>
+              {riskMonitorMode === "backcast" &&
+                monitorPoints.every((point) => typeof point.portfolioBeta === "number") && (
+                  <div className="beta-trend-section">
+                    <div className="beta-trend-heading">
+                      <div>
+                        <p className="eyebrow">Systematic market sensitivity</p>
+                        <h3>Portfolio beta · 30 days</h3>
+                      </div>
+                      <strong>{latestRiskTrend.portfolioBeta?.toFixed(2)}</strong>
+                    </div>
+                    <PortfolioBetaChart points={monitorPoints} />
+                    <div className="plot-legend risk-trend-legend">
+                      <span><i className="legend-line beta-trend-key" />Portfolio beta vs. SPY</span>
+                      <span><i className="legend-line beta-reference-key" />Market beta 1.0</span>
+                    </div>
+                  </div>
+                )}
+            </div>
+            <div className="risk-change-list">
+              <h3>Latest component changes</h3>
+              {latestRiskTrend.contributions.slice(0, 8).map((item) => {
+                const increasing = (item.change ?? 0) > 0;
+                return (
+                  <article key={item.symbol}>
+                    <div>
+                      <strong>{item.symbol}</strong>
+                      <small>{money.format(item.amount)} · {percent.format(item.share)}</small>
+                    </div>
+                    <b className={increasing ? "risk-change-up" : "risk-change-down"}>
+                      {item.change === null
+                        ? "New"
+                        : `${increasing ? "+" : ""}${money.format(item.change)}`}
+                    </b>
+                  </article>
+                );
+              })}
+            </div>
+          </div>
+        ) : (
+          <p className="risk-monitor-empty">
+            {monitorStatus} {riskMonitorMode === "actual"
+              ? "Keep the Python service running and calculate the same model, confidence, and horizon over time to build the monitoring series."
+              : "The backcast needs at least 252 synchronized prior trading observations for every current position."}
+          </p>
+        )}
       </section>
 
       <section className="frontier panel" id="frontier">

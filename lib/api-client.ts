@@ -6,6 +6,8 @@ const desktopPaths: Record<string, string> = {
   "/api/portfolios": "/api/v1/portfolios",
   "/api/rates": "/api/v1/rates",
   "/api/risk": "/api/v1/risk/calculate",
+  "/api/risk-history": "/api/v1/risk/history",
+  "/api/risk-backcast": "/api/v1/risk/backcast",
 };
 
 export function apiUrl(path: string) {

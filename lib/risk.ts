@@ -65,6 +65,9 @@ export type RiskResult = {
   contributions: Contribution[];
   historyStart?: string;
   historyEnd?: string;
+  varFloor?: number;
+  varFloorApplied?: boolean;
+  portfolioKey?: string;
   engine?: string;
   runId?: number;
 };
@@ -299,8 +302,7 @@ export function calculatePortfolioAlphaBeta(
     const series = history.series.find((item) => item.symbol === position.symbol);
     if (!series) return [];
     return [{
-      weight: position.marketValue * position.delta * Math.sign(position.quantity || 1) /
-        grossMarketValue,
+      weight: directionalExposure(position) / grossMarketValue,
       returns: new Map(dailyReturns(series).map((item) => [item.date, item.value])),
     }];
   });
@@ -671,15 +673,54 @@ function portfolioDailyVolatility(positions: Position[]) {
   return Math.sqrt(Math.max(variance, 0));
 }
 
+function componentRiskShares(positions: Position[]) {
+  const exposures = positions.map(
+    (position) => directionalExposure(position) * position.volatility / Math.sqrt(252),
+  );
+  const varianceContributions = exposures.map((exposure, index) =>
+    exposure * exposures.reduce(
+      (sum, otherExposure, otherIndex) =>
+        sum + correlation(positions[index], positions[otherIndex]) * otherExposure,
+      0,
+    ));
+  const variance = varianceContributions.reduce((sum, value) => sum + value, 0);
+  if (variance <= 0) return positions.map(() => 0);
+  return varianceContributions.map((value) => value / variance);
+}
+
+function correlationCholesky(positions: Position[]) {
+  const size = positions.length;
+  const lower = Array.from({ length: size }, () =>
+    Array.from({ length: size }, () => 0));
+  for (let row = 0; row < size; row += 1) {
+    for (let column = 0; column <= row; column += 1) {
+      let value = correlation(positions[row], positions[column]);
+      for (let index = 0; index < column; index += 1) {
+        value -= lower[row][index] * lower[column][index];
+      }
+      if (row === column) {
+        lower[row][column] = Math.sqrt(Math.max(value, 1e-10));
+      } else {
+        lower[row][column] = value / lower[column][column];
+      }
+    }
+  }
+  return lower;
+}
+
 function scenarioLosses(positions: Position[], count: number, heavyTails: boolean) {
   const random = mulberry32(20260718 + positions.length * 101);
+  const cholesky = correlationCholesky(positions);
   const losses: number[] = [];
   for (let scenario = 0; scenario < count; scenario += 1) {
-    const marketShock = normal(random);
+    const independent = positions.map(() => normal(random));
     let pnl = 0;
-    for (const position of positions) {
-      const idiosyncraticShock = normal(random);
-      let shock = position.beta * marketShock * 0.62 + idiosyncraticShock * Math.sqrt(Math.max(0.08, 1 - Math.min(0.92, position.beta ** 2 * 0.38)));
+    for (let positionIndex = 0; positionIndex < positions.length; positionIndex += 1) {
+      const position = positions[positionIndex];
+      let shock = cholesky[positionIndex].reduce(
+        (sum, coefficient, index) => sum + coefficient * independent[index],
+        0,
+      );
       if (heavyTails && scenario % 47 === 0) shock *= 1.8;
       const dailyMove = shock * position.volatility / Math.sqrt(252);
       pnl += directionalExposure(position) * dailyMove;
@@ -767,6 +808,8 @@ export function calculateRisk(
   let expectedShortfall: number;
   let observations: number;
   let historyDates: string[] = [];
+  let varFloor: number | undefined;
+  let varFloorApplied = false;
 
   if (model === "historical") {
     const historical = history
@@ -781,6 +824,17 @@ export function calculateRisk(
     valueAtRisk = Math.max(0, quantile(sorted, confidence));
     const tail = sorted.filter((loss) => loss >= valueAtRisk);
     expectedShortfall = tail.reduce((sum, loss) => sum + loss, 0) / Math.max(1, tail.length);
+    const floorVolatility = dailyVolatility || portfolioDailyVolatility(positions);
+    const z = inverseNormal(confidence);
+    varFloor = z * floorVolatility * scale;
+    if (valueAtRisk <= 0 && varFloor > 0) {
+      valueAtRisk = varFloor;
+      expectedShortfall =
+        floorVolatility * scale *
+        (Math.exp(-(z ** 2) / 2) / Math.sqrt(2 * Math.PI)) /
+        (1 - confidence);
+      varFloorApplied = true;
+    }
   } else if (model === "parametric") {
     const z = inverseNormal(confidence);
     valueAtRisk = z * dailyVolatility * scale;
@@ -810,14 +864,14 @@ export function calculateRisk(
         scale,
     0,
   );
-  const rawContributions = positions.map((position) => ({
+  const contributionShares = componentRiskShares(positions);
+  const rawContributions = positions.map((position, index) => ({
     ...position,
-    amount: Math.abs(position.marketValue * position.delta * position.volatility * (0.35 + Math.abs(position.beta))),
+    amount: contributionShares[index] * valueAtRisk,
+    share: contributionShares[index],
   }));
-  const contributionTotal = rawContributions.reduce((sum, item) => sum + item.amount, 0) || 1;
   const contributions = rawContributions
-    .map((item) => ({ ...item, share: item.amount / contributionTotal }))
-    .sort((left, right) => right.share - left.share);
+    .sort((left, right) => right.amount - left.amount);
 
   const maximumLoss = Math.max(...losses.map(Math.abs), valueAtRisk * 1.3, 1);
   const range = Math.ceil(maximumLoss / 5000) * 5000;
@@ -836,6 +890,8 @@ export function calculateRisk(
     contributions,
     historyStart: historyDates[0],
     historyEnd: historyDates.at(-1),
+    varFloor,
+    varFloorApplied,
   };
 }
 
