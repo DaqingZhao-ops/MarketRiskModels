@@ -267,6 +267,17 @@ h2 { margin: 0; font-size: 25px; letter-spacing: -.035em; }
 .risk-trend-grid { stroke: #dedfd8; stroke-width: 1; }
 .risk-trend-var { fill: none; stroke: var(--coral); stroke-width: 2.5; }
 .risk-trend-percent { fill: none; stroke: var(--green); stroke-width: 1.8; stroke-dasharray: 5 4; }
+.interactive-trend-chart { cursor: crosshair; touch-action: none; }
+.trend-hover { pointer-events: none; }
+.trend-hover-guide { stroke: #7f8b85; stroke-width: 1; stroke-dasharray: 3 3; }
+.trend-hover-var-dot { fill: var(--coral); stroke: var(--panel); stroke-width: 2; }
+.trend-hover-percent-dot, .trend-hover-beta-dot { fill: var(--green); stroke: var(--panel); stroke-width: 2; }
+.trend-tooltip-box { fill: #172520; stroke: #50645b; stroke-width: 1; opacity: .96; }
+.risk-trend-chart .trend-tooltip-date,
+.beta-trend-chart .trend-tooltip-date { fill: #b9c7c0; font-size: 9px; }
+.risk-trend-chart .trend-tooltip-value,
+.beta-trend-chart .trend-tooltip-value { fill: white; font-size: 10px; font-weight: 700; }
+.risk-trend-chart .trend-tooltip-secondary { fill: #d3ddd8; font-size: 8px; }
 .risk-trend-legend { margin: 2px 0 10px 70px; }
 .risk-trend-var-key { border-color: var(--coral); }
 .risk-trend-percent-key { border-color: var(--green); border-top-style: dashed; }

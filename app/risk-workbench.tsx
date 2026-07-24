@@ -273,13 +273,15 @@ function EfficientFrontierChart({ data }: { data: EfficientFrontierResult }) {
 }
 
 function RiskTrendChart({ points }: { points: RiskTrendPoint[] }) {
+  const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   const width = 760;
   const height = 250;
   const margin = { top: 18, right: 28, bottom: 34, left: 70 };
+  const plotWidth = width - margin.left - margin.right;
   const maxVar = Math.max(...points.map((point) => point.var), 1);
   const maxPercent = Math.max(...points.map((point) => point.varPercent), 0.0001);
   const x = (index: number) => margin.left +
-    index / Math.max(points.length - 1, 1) * (width - margin.left - margin.right);
+    index / Math.max(points.length - 1, 1) * plotWidth;
   const yVar = (value: number) => height - margin.bottom -
     value / maxVar * (height - margin.top - margin.bottom);
   const yPercent = (value: number) => height - margin.bottom -
@@ -287,8 +289,25 @@ function RiskTrendChart({ points }: { points: RiskTrendPoint[] }) {
   const path = (values: number[], y: (value: number) => number) =>
     values.map((value, index) =>
       `${index ? "L" : "M"} ${x(index).toFixed(1)} ${y(value).toFixed(1)}`).join(" ");
+  const hoveredPoint = hoveredIndex === null ? null : points[hoveredIndex];
+  const tooltipWidth = 160;
+  const tooltipX = hoveredIndex === null
+    ? 0
+    : Math.min(Math.max(x(hoveredIndex) - tooltipWidth / 2, margin.left), width - margin.right - tooltipWidth);
+  const updateHoveredPoint = (clientX: number, chart: SVGSVGElement) => {
+    const bounds = chart.getBoundingClientRect();
+    const svgX = (clientX - bounds.left) / bounds.width * width;
+    const index = Math.round((svgX - margin.left) / plotWidth * Math.max(points.length - 1, 1));
+    setHoveredIndex(Math.max(0, Math.min(points.length - 1, index)));
+  };
   return (
-    <svg className="risk-trend-chart" viewBox={`0 0 ${width} ${height}`} role="img">
+    <svg
+      className="risk-trend-chart interactive-trend-chart"
+      viewBox={`0 0 ${width} ${height}`}
+      role="img"
+      onPointerMove={(event) => updateHoveredPoint(event.clientX, event.currentTarget)}
+      onPointerLeave={() => setHoveredIndex(null)}
+    >
       <title>Portfolio value at risk trend</title>
       <desc>Dollar value at risk and value at risk as a percentage of gross market value over persisted calculations.</desc>
       {[0, 0.5, 1].map((fraction) => {
@@ -305,6 +324,29 @@ function RiskTrendChart({ points }: { points: RiskTrendPoint[] }) {
       })}
       <path d={path(points.map((point) => point.var), yVar)} className="risk-trend-var" />
       <path d={path(points.map((point) => point.varPercent), yPercent)} className="risk-trend-percent" />
+      {hoveredPoint && hoveredIndex !== null && (
+        <g className="trend-hover">
+          <line
+            x1={x(hoveredIndex)}
+            y1={margin.top}
+            x2={x(hoveredIndex)}
+            y2={height - margin.bottom}
+            className="trend-hover-guide"
+          />
+          <circle cx={x(hoveredIndex)} cy={yVar(hoveredPoint.var)} r="4.5" className="trend-hover-var-dot" />
+          <circle cx={x(hoveredIndex)} cy={yPercent(hoveredPoint.varPercent)} r="4" className="trend-hover-percent-dot" />
+          <g transform={`translate(${tooltipX} ${margin.top + 5})`}>
+            <rect width={tooltipWidth} height="54" rx="4" className="trend-tooltip-box" />
+            <text x="10" y="15" className="trend-tooltip-date">
+              {new Date(hoveredPoint.timestamp).toLocaleDateString()}
+            </text>
+            <text x="10" y="32" className="trend-tooltip-value">VaR {money.format(hoveredPoint.var)}</text>
+            <text x="10" y="46" className="trend-tooltip-secondary">
+              {percent.format(hoveredPoint.varPercent)} of gross value
+            </text>
+          </g>
+        </g>
+      )}
       <text x={margin.left} y={height - 10}>
         {new Date(points[0].timestamp).toLocaleDateString()}
       </text>
@@ -316,9 +358,11 @@ function RiskTrendChart({ points }: { points: RiskTrendPoint[] }) {
 }
 
 function PortfolioBetaChart({ points }: { points: RiskTrendPoint[] }) {
+  const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   const width = 760;
   const height = 210;
   const margin = { top: 18, right: 28, bottom: 34, left: 70 };
+  const plotWidth = width - margin.left - margin.right;
   const values = points.map((point) => point.portfolioBeta ?? 0);
   const observedMinimum = Math.min(...values, 1);
   const observedMaximum = Math.max(...values, 1);
@@ -326,14 +370,31 @@ function PortfolioBetaChart({ points }: { points: RiskTrendPoint[] }) {
   const minimum = observedMinimum - padding;
   const maximum = observedMaximum + padding;
   const x = (index: number) => margin.left +
-    index / Math.max(points.length - 1, 1) * (width - margin.left - margin.right);
+    index / Math.max(points.length - 1, 1) * plotWidth;
   const y = (value: number) => margin.top +
     (maximum - value) / (maximum - minimum) * (height - margin.top - margin.bottom);
   const path = values.map((value, index) =>
     `${index ? "L" : "M"} ${x(index).toFixed(1)} ${y(value).toFixed(1)}`).join(" ");
   const ticks = [minimum, (minimum + maximum) / 2, maximum];
+  const hoveredPoint = hoveredIndex === null ? null : points[hoveredIndex];
+  const tooltipWidth = 145;
+  const tooltipX = hoveredIndex === null
+    ? 0
+    : Math.min(Math.max(x(hoveredIndex) - tooltipWidth / 2, margin.left), width - margin.right - tooltipWidth);
+  const updateHoveredPoint = (clientX: number, chart: SVGSVGElement) => {
+    const bounds = chart.getBoundingClientRect();
+    const svgX = (clientX - bounds.left) / bounds.width * width;
+    const index = Math.round((svgX - margin.left) / plotWidth * Math.max(points.length - 1, 1));
+    setHoveredIndex(Math.max(0, Math.min(points.length - 1, index)));
+  };
   return (
-    <svg className="beta-trend-chart" viewBox={`0 0 ${width} ${height}`} role="img">
+    <svg
+      className="beta-trend-chart interactive-trend-chart"
+      viewBox={`0 0 ${width} ${height}`}
+      role="img"
+      onPointerMove={(event) => updateHoveredPoint(event.clientX, event.currentTarget)}
+      onPointerLeave={() => setHoveredIndex(null)}
+    >
       <title>Thirty-day fixed-portfolio beta trend</title>
       <desc>Trailing portfolio beta against SPY for the current holdings over the prior 30 trading days.</desc>
       {ticks.map((tick) => (
@@ -344,6 +405,32 @@ function PortfolioBetaChart({ points }: { points: RiskTrendPoint[] }) {
       ))}
       <line x1={margin.left} y1={y(1)} x2={width - margin.right} y2={y(1)} className="beta-reference" />
       <path d={path} className="beta-trend-line" />
+      {hoveredPoint && hoveredIndex !== null && (
+        <g className="trend-hover">
+          <line
+            x1={x(hoveredIndex)}
+            y1={margin.top}
+            x2={x(hoveredIndex)}
+            y2={height - margin.bottom}
+            className="trend-hover-guide"
+          />
+          <circle
+            cx={x(hoveredIndex)}
+            cy={y(hoveredPoint.portfolioBeta ?? 0)}
+            r="4.5"
+            className="trend-hover-beta-dot"
+          />
+          <g transform={`translate(${tooltipX} ${margin.top + 5})`}>
+            <rect width={tooltipWidth} height="40" rx="4" className="trend-tooltip-box" />
+            <text x="10" y="15" className="trend-tooltip-date">
+              {new Date(hoveredPoint.timestamp).toLocaleDateString()}
+            </text>
+            <text x="10" y="32" className="trend-tooltip-value">
+              Beta {(hoveredPoint.portfolioBeta ?? 0).toFixed(3)}
+            </text>
+          </g>
+        </g>
+      )}
       <text x={margin.left} y={height - 10}>
         {new Date(points[0].timestamp).toLocaleDateString()}
       </text>
