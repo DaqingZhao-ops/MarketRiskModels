@@ -41,12 +41,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         let frame = NSRect(x: 0, y: 0, width: 1440, height: 920)
         window = NSWindow(
             contentRect: frame,
-            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
         )
         window.title = "Market Risk Models"
-        window.titlebarAppearsTransparent = true
+        window.titlebarAppearsTransparent = false
+        window.isMovable = true
         window.center()
 
         let configuration = WKWebViewConfiguration()
