@@ -1,6 +1,6 @@
 "use client";
 
-import { ChangeEvent, DragEvent, KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, DragEvent, KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   DEFAULT_POSITIONS,
   HistoricalData,
@@ -453,6 +453,7 @@ export function RiskWorkbench() {
   const [importBusy, setImportBusy] = useState(false);
   const [importInputKey, setImportInputKey] = useState(0);
   const [history, setHistory] = useState<HistoricalData>();
+  const [positionsRefreshing, setPositionsRefreshing] = useState(false);
   const [marketBriefing, setMarketBriefing] = useState<MarketBriefing>();
   const [marketBriefingError, setMarketBriefingError] = useState("");
   const [marketBriefingRefreshing, setMarketBriefingRefreshing] = useState(false);
@@ -577,56 +578,82 @@ export function RiskWorkbench() {
     [positions],
   );
 
+  const loadPositionMarketData = useCallback(async (
+    signal: AbortSignal,
+    forceRefresh = false,
+  ) => {
+    if (!symbolsKey || !rateModelLoaded) return;
+    if (forceRefresh) setPositionsRefreshing(true);
+    setHistoryStatus(forceRefresh
+      ? "Refreshing latest market data and recalculating portfolio…"
+      : "Loading market history…");
+    try {
+      const query = new URLSearchParams({ symbols: symbolsKey });
+      if (forceRefresh) query.set("refresh", "1");
+      const response = await fetch(apiUrl(`/api/history?${query}`), {
+        signal,
+        cache: forceRefresh ? "no-store" : "default",
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error ?? payload.detail ?? "Unable to load market history.");
+      setHistory(payload as HistoricalData);
+      const enriched = enrichPositionsWithHistoricalRisk(
+        positionsRef.current,
+        payload as HistoricalData,
+        new Date(),
+        rateCalibration,
+        forceRefresh,
+      );
+      setPositions(enriched);
+      setHistoryStatus(forceRefresh
+        ? `Portfolio refreshed with market data fetched ${new Date(payload.fetchedAt).toLocaleString()}.`
+        : "Latest eligible prices and market history loaded.");
+      try {
+        const persistResponse = await fetch(apiUrl("/api/portfolios"), {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ positions: enriched }),
+          signal,
+        });
+        const persistPayload = await persistResponse.json();
+        if (!persistResponse.ok) {
+          throw new Error(persistPayload.error ?? persistPayload.detail ?? "Calculated values could not be saved.");
+        }
+        setPortfolioVersions(persistPayload.versions as PortfolioVersion[]);
+        setPortfolioSaveStatus(forceRefresh
+          ? "Refreshed prices and calculated values saved to the current default."
+          : "Calculated risk factors saved to the current default.");
+      } catch (error) {
+        if (signal.aborted) return;
+        setPortfolioSaveStatus(
+          error instanceof Error ? error.message : "Calculated values could not be saved.",
+        );
+      }
+    } catch (error) {
+      if (signal.aborted) return;
+      if (!forceRefresh) setHistory(undefined);
+      setHistoryStatus(error instanceof Error ? error.message : "Unable to load market history.");
+    } finally {
+      if (forceRefresh && !signal.aborted) setPositionsRefreshing(false);
+    }
+  }, [rateCalibration, rateModelLoaded, symbolsKey]);
+
+  async function refreshPositionMarketData() {
+    const controller = new AbortController();
+    await loadPositionMarketData(controller.signal, true);
+  }
+
   useEffect(() => {
     if (!symbolsKey || !rateModelLoaded) return;
     const controller = new AbortController();
-    const timer = window.setTimeout(async () => {
-      setHistoryStatus("Loading market history…");
-      try {
-        const response = await fetch(apiUrl(`/api/history?symbols=${encodeURIComponent(symbolsKey)}`), {
-          signal: controller.signal,
-        });
-        const payload = await response.json();
-        if (!response.ok) throw new Error(payload.error ?? "Unable to load market history.");
-        setHistory(payload as HistoricalData);
-        const enriched = enrichPositionsWithHistoricalRisk(
-          positionsRef.current,
-          payload as HistoricalData,
-          new Date(),
-          rateCalibration,
-        );
-        setPositions(enriched);
-        setHistoryStatus("Latest eligible prices and market history loaded.");
-        try {
-          const persistResponse = await fetch(apiUrl("/api/portfolios"), {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ positions: enriched }),
-            signal: controller.signal,
-          });
-          const persistPayload = await persistResponse.json();
-          if (!persistResponse.ok) {
-            throw new Error(persistPayload.error ?? "Calculated risk factors could not be saved.");
-          }
-          setPortfolioVersions(persistPayload.versions as PortfolioVersion[]);
-          setPortfolioSaveStatus("Calculated risk factors saved to the current default.");
-        } catch (error) {
-          if (controller.signal.aborted) return;
-          setPortfolioSaveStatus(
-            error instanceof Error ? error.message : "Calculated risk factors could not be saved.",
-          );
-        }
-      } catch (error) {
-        if (controller.signal.aborted) return;
-        setHistory(undefined);
-        setHistoryStatus(error instanceof Error ? error.message : "Unable to load market history.");
-      }
+    const timer = window.setTimeout(() => {
+      void loadPositionMarketData(controller.signal);
     }, 350);
     return () => {
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [symbolsKey, rateCalibration, rateModelLoaded]);
+  }, [loadPositionMarketData, rateModelLoaded, symbolsKey]);
 
   const continuityResult: RiskResult = useMemo(
     () => calculateRisk(positions, model, confidence, horizon, history),
@@ -1714,6 +1741,13 @@ export function RiskWorkbench() {
             <h2>Positions & sensitivities</h2>
           </div>
           <div className="portfolio-history">
+            <button
+              className="secondary refresh-positions"
+              disabled={positionsRefreshing || !rateModelLoaded}
+              onClick={() => void refreshPositionMarketData()}
+            >
+              {positionsRefreshing ? "Refreshing…" : "Refresh prices & risk"}
+            </button>
             <select
               aria-label="Position source files"
               value={selectedVersionId}
@@ -1739,6 +1773,7 @@ export function RiskWorkbench() {
           </div>
         </div>
         {importStatus ? <p className="portfolio-import-status" role="status">{importStatus}</p> : null}
+        <p className="position-market-status" role="status">{historyStatus}</p>
         <p className="portfolio-save-status" role="status">{portfolioSaveStatus}</p>
         <div className="table-wrap">
           <table>

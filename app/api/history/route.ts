@@ -36,13 +36,15 @@ type YahooChart = {
   };
 };
 
-async function fetchTreasuryCurve() {
+async function fetchTreasuryCurve(forceRefresh = false) {
   const now = new Date();
   const month = `${now.getUTCFullYear()}${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
   const url = new URL("https://home.treasury.gov/resource-center/data-chart-center/interest-rates/pages/xml");
   url.searchParams.set("data", "daily_treasury_yield_curve");
   url.searchParams.set("field_tdr_date_value_month", month);
-  const response = await fetch(url, { next: { revalidate: 21600 } });
+  const response = await fetch(url, forceRefresh
+    ? { cache: "no-store" }
+    : { next: { revalidate: 21600 } });
   if (!response.ok) throw new Error(`Treasury yield curve request failed (${response.status})`);
   const xml = await response.text();
   const entries = xml.match(/<entry>[\s\S]*?<\/entry>/gi) ?? [];
@@ -65,7 +67,12 @@ async function fetchTreasuryCurve() {
   return { asOf: dateMatch?.[1] ?? now.toISOString(), yields };
 }
 
-async function fetchSeries(symbol: string, period1: number, period2: number) {
+async function fetchSeries(
+  symbol: string,
+  period1: number,
+  period2: number,
+  forceRefresh = false,
+) {
   const mapped = sourceSymbol(symbol);
   const url = new URL(
     `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(mapped)}`,
@@ -77,7 +84,7 @@ async function fetchSeries(symbol: string, period1: number, period2: number) {
   url.searchParams.set("includeAdjustedClose", "true");
   const response = await fetch(url, {
     headers: { "User-Agent": "Mozilla/5.0 MarketRiskModels/1.0" },
-    next: { revalidate: 300 },
+    ...(forceRefresh ? { cache: "no-store" as const } : { next: { revalidate: 300 } }),
   });
   if (!response.ok) throw new Error(`${mapped}: market-data request failed (${response.status})`);
   const payload = await response.json() as YahooChart;
@@ -111,6 +118,7 @@ async function fetchSeries(symbol: string, period1: number, period2: number) {
 }
 
 export async function GET(request: NextRequest) {
+  const forceRefresh = request.nextUrl.searchParams.get("refresh") === "1";
   const requested = (request.nextUrl.searchParams.get("symbols") ?? "")
     .split(",")
     .map((symbol) => symbol.trim().toUpperCase())
@@ -123,9 +131,10 @@ export async function GET(request: NextRequest) {
   const period1 = period2 - 4 * 366 * 86400;
   try {
     const [results, treasuryResult] = await Promise.all([
-      Promise.allSettled(symbols.map((symbol) => fetchSeries(symbol, period1, period2))),
+      Promise.allSettled(symbols.map((symbol) =>
+        fetchSeries(symbol, period1, period2, forceRefresh))),
       symbols.some((symbol) => /^UST(2|5|10|20)Y$/.test(symbol))
-        ? fetchTreasuryCurve().catch(() => undefined)
+        ? fetchTreasuryCurve(forceRefresh).catch(() => undefined)
         : Promise.resolve(undefined),
     ]);
     const series = results.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);

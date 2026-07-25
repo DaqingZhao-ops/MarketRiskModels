@@ -142,6 +142,44 @@ test("calculates missing broker risk factors from historical prices", () => {
   assert.equal(enriched.marketValue, 25000);
 });
 
+test("refreshes a provided stock price without replacing provided risk factors", () => {
+  const dates = Array.from({ length: 61 }, (_, index) =>
+    new Date(Date.UTC(2026, 0, index + 1)).toISOString().slice(0, 10));
+  const position = {
+    id: "provided-aapl",
+    symbol: "AAPL",
+    type: "Stock",
+    quantity: 10,
+    price: 200,
+    multiplier: 1,
+    marketValue: 2000,
+    volatility: 0.45,
+    beta: 1.4,
+    delta: 1,
+    riskSource: "provided",
+  };
+  const history = {
+    source: "test",
+    fetchedAt: "2026-03-02T00:00:00Z",
+    mappings: { AAPL: "AAPL" },
+    series: [{
+      symbol: "AAPL",
+      sourceSymbol: "AAPL",
+      dates,
+      adjustedClose: dates.map((_, index) => 200 + index),
+      latestPrice: 275,
+      latestPriceAt: "2026-03-02T21:00:00Z",
+    }],
+  };
+  const [enriched] = enrichPositionsWithHistoricalRisk([position], history);
+  assert.equal(enriched.price, 275);
+  assert.equal(enriched.marketPrice, 275);
+  assert.equal(enriched.marketValue, 2750);
+  assert.equal(enriched.volatility, 0.45);
+  assert.equal(enriched.beta, 1.4);
+  assert.equal(enriched.riskSource, "provided");
+});
+
 test("uses a labeled Black-Scholes fallback for simplified stock options", () => {
   const dates = Array.from({ length: 61 }, (_, index) =>
     new Date(Date.UTC(2026, 0, index + 1)).toISOString().slice(0, 10));

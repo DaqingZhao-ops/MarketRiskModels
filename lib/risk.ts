@@ -144,12 +144,12 @@ export function enrichPositionsWithHistoricalRisk(
   history: HistoricalData,
   asOf = new Date(),
   rateCalibration?: HullWhiteCalibration,
+  refreshAllRisk = false,
 ) {
   const benchmark = history.series.find((item) => item.symbol === "SPY");
   return positions.map((position) => {
-    const refreshRisk = ["historical-pending", "fallback"].includes(position.riskSource ?? "");
-    const modelSensitive = ["Bond", "Bond Option", "Stock Option", "ETF Option"].includes(position.type);
-    if (!refreshRisk && !modelSensitive) return position;
+    const refreshRisk = refreshAllRisk ||
+      ["historical-pending", "fallback"].includes(position.riskSource ?? "");
     const series = history.series.find((item) => item.symbol === position.symbol);
     if (!series || series.adjustedClose.length < 30) {
       return refreshRisk ? { ...position, riskSource: "fallback" as const } : position;

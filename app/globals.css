@@ -383,6 +383,8 @@ h2 { margin: 0; font-size: 25px; letter-spacing: -.035em; }
 .portfolio-history select { min-width: 245px; border: 1px solid #95a99f; padding: 9px 11px; background: transparent; color: var(--ink); font-size: 10px; }
 .portfolio-history .secondary { padding: 9px 13px; }
 .portfolio-history .secondary:disabled { opacity: .45; cursor: not-allowed; }
+.portfolio-history .refresh-positions { white-space: nowrap; }
+.position-market-status { margin: -8px 27px 5px; color: #285f48; font-size: 10px; }
 .portfolio-save-status { margin: -8px 27px 14px; color: var(--muted); font-size: 10px; }
 .table-wrap { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; }

@@ -220,6 +220,7 @@ async def market_history(
     session: SessionDependency,
     settings: SettingsDependency,
     symbols: str = Query(min_length=1),
+    refresh: bool = Query(default=False),
 ) -> dict[str, Any]:
     requested = list(dict.fromkeys(
         symbol.strip().upper() for symbol in symbols.split(",") if symbol.strip()
@@ -227,7 +228,12 @@ async def market_history(
     series: list[dict[str, Any]] = []
     for symbol in requested:
         try:
-            records = await load_series(session, symbol, settings)
+            records = await load_series(
+                session,
+                symbol,
+                settings,
+                force_refresh=refresh,
+            )
         except Exception:
             continue
         if not records:
