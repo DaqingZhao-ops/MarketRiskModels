@@ -18,7 +18,7 @@ def test_source_symbol_maps_options_and_treasury_proxy() -> None:
     assert source_symbol("spy") == "SPY"
 
 
-def test_load_series_persists_and_reuses_fresh_history(monkeypatch) -> None:
+def test_load_series_persists_reuses_cache_and_honors_force_refresh(monkeypatch) -> None:
     calls = 0
 
     async def fake_fetch(_: str):
@@ -39,7 +39,14 @@ def test_load_series_persists_and_reuses_fresh_history(monkeypatch) -> None:
     with Session(engine) as session:
         first = asyncio.run(load_series(session, "SPY", settings))
         second = asyncio.run(load_series(session, "SPY", settings))
+        refreshed = asyncio.run(load_series(
+            session,
+            "SPY",
+            settings,
+            force_refresh=True,
+        ))
         assert [row.adjusted_close for row in first] == [699.50, 701.25]
         assert [row.adjusted_close for row in second] == [699.50, 701.25]
-        assert calls == 1
+        assert [row.adjusted_close for row in refreshed] == [699.50, 701.25]
+        assert calls == 2
     engine.dispose()

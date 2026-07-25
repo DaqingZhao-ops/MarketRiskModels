@@ -245,13 +245,18 @@ async def market_history(
             "adjustedClose": [record.adjusted_close for record in records],
             "latestPrice": records[-1].adjusted_close,
             "latestPriceAt": records[-1].trading_date.isoformat(),
+            "retrievedAt": records[-1].retrieved_at.isoformat(),
             "currency": "USD",
         })
     if not series:
         raise HTTPException(status_code=502, detail="No price history was returned.")
     return {
-        "source": "Yahoo Finance adjusted daily close (local Python cache)",
+        "source": (
+            "Yahoo Finance latest quote and adjusted daily close "
+            f"({'fresh download' if refresh else 'local Python cache'})"
+        ),
         "fetchedAt": datetime.now(timezone.utc).isoformat(),
+        "forceRefreshed": refresh,
         "mappings": {item["symbol"]: item["sourceSymbol"] for item in series},
         "series": series,
     }

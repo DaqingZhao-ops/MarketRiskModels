@@ -60,6 +60,19 @@ async def fetch_yahoo_series(symbol: str, years: int = 4) -> list[tuple[date, fl
         if isinstance(price, (int, float)) and price > 0:
             trading_date = datetime.fromtimestamp(timestamp, tz=timezone.utc).date()
             observations.append((trading_date, float(price)))
+    meta = result.get("meta") or {}
+    latest_quote = meta.get("regularMarketPrice")
+    latest_quote_time = meta.get("regularMarketTime")
+    if isinstance(latest_quote, (int, float)) and latest_quote > 0:
+        quote_date = (
+            datetime.fromtimestamp(latest_quote_time, tz=timezone.utc).date()
+            if isinstance(latest_quote_time, (int, float))
+            else datetime.now(timezone.utc).date()
+        )
+        if observations and observations[-1][0] == quote_date:
+            observations[-1] = (quote_date, float(latest_quote))
+        else:
+            observations.append((quote_date, float(latest_quote)))
     if len(observations) < 2:
         raise ValueError(f"{mapped}: insufficient market history")
     return observations

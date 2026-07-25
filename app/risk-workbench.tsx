@@ -596,6 +596,9 @@ export function RiskWorkbench() {
       });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error ?? payload.detail ?? "Unable to load market history.");
+      if (forceRefresh) {
+        setHistoryStatus("Fresh market-data download complete; recalculating all dependent metrics…");
+      }
       setHistory(payload as HistoricalData);
       const enriched = enrichPositionsWithHistoricalRisk(
         positionsRef.current,
@@ -605,8 +608,12 @@ export function RiskWorkbench() {
         forceRefresh,
       );
       setPositions(enriched);
+      const retrievedTimes = (payload as HistoricalData).series
+        .map((item) => item.retrievedAt)
+        .filter((value): value is string => Boolean(value));
+      const latestRetrieval = retrievedTimes.sort().at(-1) ?? payload.fetchedAt;
       setHistoryStatus(forceRefresh
-        ? `Portfolio refreshed with market data fetched ${new Date(payload.fetchedAt).toLocaleString()}.`
+        ? `Fresh data downloaded ${new Date(latestRetrieval).toLocaleString()}; all dependent metrics recalculated.`
         : "Latest eligible prices and market history loaded.");
       try {
         const persistResponse = await fetch(apiUrl("/api/portfolios"), {

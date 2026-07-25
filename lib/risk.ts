@@ -38,6 +38,7 @@ export type HistoricalSeries = {
   adjustedClose: number[];
   latestPrice?: number;
   latestPriceAt?: string;
+  retrievedAt?: string;
   currency?: string;
 };
 
