@@ -1,6 +1,6 @@
 "use client";
 
-import { ChangeEvent, DragEvent, KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, DragEvent, KeyboardEvent, MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   DEFAULT_POSITIONS,
   HistoricalData,
@@ -144,6 +144,28 @@ type PositionSort = {
   field: SortField;
   direction: "asc" | "desc";
 };
+
+function openNewsArticle(event: MouseEvent<HTMLAnchorElement>, url: string) {
+  if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+    return;
+  }
+
+  const width = Math.min(1100, window.screen.availWidth);
+  const height = Math.min(800, window.screen.availHeight);
+  const left = Math.max(0, Math.round((window.screen.availWidth - width) / 2));
+  const top = Math.max(0, Math.round((window.screen.availHeight - height) / 2));
+  const articleWindow = window.open(
+    url,
+    "yahoo-finance-article",
+    `popup=yes,width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes`,
+  );
+
+  if (articleWindow) {
+    event.preventDefault();
+    articleWindow.opener = null;
+    articleWindow.focus();
+  }
+}
 
 function MarketSparkline({ values }: { values: number[] }) {
   if (values.length < 2) return <span className="market-sparkline-empty">Trend unavailable</span>;
@@ -1222,7 +1244,14 @@ export function RiskWorkbench() {
             <ol>
               {marketBriefing.headlines.slice(0, 5).map((headline) => (
                 <li key={headline.url}>
-                  <a href={headline.url} target="_blank" rel="noreferrer">{headline.title}</a>
+                  <a
+                    href={headline.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    onClick={(event) => openNewsArticle(event, headline.url)}
+                  >
+                    {headline.title}
+                  </a>
                 </li>
               ))}
             </ol>
