@@ -291,6 +291,7 @@ async function fetchSeries(
   period1: number,
   period2: number,
   forceRefresh = false,
+  includeFundamentals = false,
 ) {
   let series: MarketSeries;
   try {
@@ -303,15 +304,24 @@ async function fetchSeries(
       throw new Error(`${sourceSymbol(symbol)}: all configured market-data providers failed`);
     }
   }
-  if (!isOccOption(symbol)) return series;
-  try {
-    return {
-      ...series,
-      optionQuote: await fetchYahooOptionQuote(symbol, forceRefresh),
-    };
-  } catch {
-    return series;
+  let enrichedSeries = series;
+  if (isOccOption(symbol)) {
+    try {
+      enrichedSeries = {
+        ...enrichedSeries,
+        optionQuote: await fetchYahooOptionQuote(symbol, forceRefresh),
+      };
+    } catch {
+      // Exact option quotes are best-effort; underlying history remains usable.
+    }
   }
+  if (includeFundamentals) {
+    enrichedSeries = {
+      ...enrichedSeries,
+      fundamentals: await fetchYahooFundamentals(symbol, forceRefresh),
+    };
+  }
+  return enrichedSeries;
 }
 
 export async function GET(request: NextRequest) {
@@ -335,24 +345,19 @@ export async function GET(request: NextRequest) {
   try {
     const [results, treasuryResult] = await Promise.all([
       Promise.allSettled(symbols.map((symbol) =>
-        fetchSeries(symbol, period1, period2, forceRefresh))),
+        fetchSeries(
+          symbol,
+          period1,
+          period2,
+          forceRefresh,
+          fundamentalSymbols.has(symbol),
+        ))),
       symbols.some((symbol) => /^UST(2|5|10|20)Y$/.test(symbol))
         ? fetchTreasuryCurve(forceRefresh).catch(() => undefined)
         : Promise.resolve(undefined),
     ]);
-    const series = await Promise.all(results.flatMap((result) =>
-      result.status === "fulfilled" ? [Promise.resolve(result.value)] : [])
-      .map(async (item) => {
-        if (!fundamentalSymbols.has(item.symbol)) return item;
-        try {
-          return {
-            ...item,
-            fundamentals: await fetchYahooFundamentals(item.symbol, forceRefresh),
-          };
-        } catch {
-          return item;
-        }
-      }));
+    const series = results.flatMap((result) =>
+      result.status === "fulfilled" ? [result.value] : []);
     if (!series.length) throw new Error("No price history was returned for the imported positions.");
     const providers = [...new Set(series.map((item) => item.source))];
     return NextResponse.json({
