@@ -1730,22 +1730,27 @@ export function RiskWorkbench() {
             </div>
           </div>
           <div className="contributors">
-            {result.contributions.slice(0, 6).map((item, index) => (
-              <div className="contributor" key={item.id}>
-                <span className="rank">0{index + 1}</span>
-                <div>
-                  <strong>{item.symbol}</strong>
-                  <small>{item.type}</small>
+            {result.contributions.slice(0, 6).map((item, index) => {
+              const contributionShare = result.var
+                ? item.amount / result.var
+                : item.share;
+              return (
+                <div className="contributor" key={item.id}>
+                  <span className="rank">0{index + 1}</span>
+                  <div>
+                    <strong>{item.symbol}</strong>
+                    <small>{item.type}</small>
+                  </div>
+                  <div className="bar">
+                    <i
+                      className={contributionShare < 0 ? "bar-hedge" : ""}
+                      style={{ width: `${Math.min(100, Math.abs(contributionShare) * 100)}%` }}
+                    />
+                  </div>
+                  <b title="Share of portfolio VaR">{percent.format(contributionShare)}</b>
                 </div>
-                <div className="bar">
-                  <i
-                    className={item.share < 0 ? "bar-hedge" : ""}
-                    style={{ width: `${Math.min(100, Math.abs(item.share) * 100)}%` }}
-                  />
-                </div>
-                <b>{percent.format(item.share)}</b>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </article>
       </section>
