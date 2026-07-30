@@ -29,6 +29,10 @@ class MarketPrice(Base):
     trading_date: Mapped[date] = mapped_column(Date, index=True)
     adjusted_close: Mapped[float] = mapped_column(Float)
     source: Mapped[str] = mapped_column(String(80), default="Yahoo Finance")
+    observed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
     retrieved_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=utc_now,

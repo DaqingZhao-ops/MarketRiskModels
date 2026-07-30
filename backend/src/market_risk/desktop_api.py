@@ -21,6 +21,12 @@ from .market_data import load_series
 from .models import PortfolioVersion, RateCalibration
 
 router = APIRouter(prefix="/api/v1")
+
+
+def utc_iso(value: datetime) -> str:
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc).isoformat()
 SessionDependency = Annotated[Session, Depends(get_session)]
 SettingsDependency = Annotated[Settings, Depends(get_settings)]
 
@@ -321,7 +327,11 @@ async def market_history(
             "dates": [record.trading_date.isoformat() for record in records],
             "adjustedClose": [record.adjusted_close for record in records],
             "latestPrice": records[-1].adjusted_close,
-            "latestPriceAt": records[-1].trading_date.isoformat(),
+            "latestPriceAt": (
+                utc_iso(records[-1].observed_at)
+                if records[-1].observed_at
+                else records[-1].trading_date.isoformat()
+            ),
             "retrievedAt": records[-1].retrieved_at.isoformat(),
             "currency": "USD",
             "provider": records[-1].source,
