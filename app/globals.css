@@ -57,10 +57,12 @@ a { color: inherit; text-decoration: none; }
 
 .market-briefing { padding: 18px 4vw 12px; background: #0e3029; color: white; }
 .market-indicators { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; border: 1px solid #37574e; background: #37574e; }
-.market-indicators article { min-height: 108px; padding: 13px 16px; background: #0e3029; display: grid; grid-template-columns: minmax(0, 1fr) 92px; gap: 4px 12px; }
+.market-indicators article { min-height: 108px; padding: 13px 16px; background: #0e3029; display: grid; grid-template-columns: minmax(0, 1fr) 92px; gap: 4px 12px; cursor: pointer; transition: background-color .14s ease, box-shadow .14s ease; }
+.market-indicators article:hover, .market-indicators article:focus-visible { background: #16453a; box-shadow: inset 0 0 0 1px #7ba99a; outline: none; }
 .market-indicators article > span { color: #a8c4ba; text-transform: uppercase; letter-spacing: .08em; font: 10px var(--font-geist-mono); }
 .market-indicators article strong { grid-column: 1; font-size: 18px; letter-spacing: -.03em; }
-.market-indicators article small { grid-column: 1; grid-row: 3; align-self: end; font: 11px var(--font-geist-mono); }
+.market-indicators article > small { grid-column: 1; grid-row: 3; align-self: end; display: grid; gap: 2px; font: 10px var(--font-geist-mono); }
+.market-previous-close { color: #8caaa0; font-size: 8px; }
 .market-indicators article em { grid-column: 1 / -1; color: #8caaa0; font: 10px var(--font-geist-mono); font-style: normal; }
 .market-future { grid-column: 1 / -1; margin-top: 5px; padding-top: 7px; border-top: 1px solid #37574e; display: grid; grid-template-columns: auto 1fr; gap: 2px 8px; align-items: baseline; }
 .market-future b { color: #ffc8b9; text-transform: uppercase; letter-spacing: .08em; font: 9px var(--font-geist-mono); }
@@ -84,9 +86,13 @@ a { color: inherit; text-decoration: none; }
 .market-headlines header { display: grid; gap: 4px; }
 .market-headlines header span { color: var(--mint); text-transform: uppercase; letter-spacing: .09em; font: 11px var(--font-geist-mono); }
 .market-headlines header small, .market-headlines > p { color: #8caaa0; font-size: 10px; }
-.market-headlines header button { margin-top: 4px; border: 1px solid #55776c; padding: 6px 8px; background: transparent; color: #d9e6e1; text-align: left; font-size: 9px; }
+.headline-actions { display: grid; gap: 5px; margin-top: 4px; }
+.market-headlines header button { border: 1px solid #55776c; padding: 6px 8px; background: transparent; color: #d9e6e1; text-align: left; font-size: 9px; }
 .market-headlines header button:hover { border-color: var(--mint); color: white; }
-.market-headlines header button:disabled { opacity: .55; cursor: wait; }
+.market-headlines header button:disabled { opacity: .55; }
+.market-headlines header .headline-refresh:disabled { cursor: wait; }
+.market-headlines header .headline-next:disabled { cursor: not-allowed; }
+.market-headlines header .headline-next[aria-busy="true"] { cursor: wait; }
 .market-headlines ol { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(5, 1fr); gap: 0; counter-reset: headlines; }
 .market-headlines li { min-height: 72px; padding: 7px 14px; border-left: 1px solid #37574e; counter-increment: headlines; }
 .market-headlines li a { display: -webkit-box; overflow: hidden; color: #e6efeb; font-size: 15px; line-height: 1.35; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
@@ -414,6 +420,9 @@ td input:focus, td select:focus { outline: none; border-color: #88a99b; backgrou
 .position-draft td { background: #f4f1e7; border-top: 2px solid #c9c3ae; border-bottom: 2px solid #c9c3ae; }
 .position-draft input, .position-draft select { background: rgba(255,255,255,.55); border-color: #d5d0bf; }
 .add-row { min-width: 52px; border: 1px solid var(--green); padding: 8px 10px; background: var(--green); color: white; font-size: 10px; font-weight: 700; }
+.position-actions { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
+.position-news { border: 1px solid #95a99f; padding: 6px 8px; background: transparent; color: var(--green); font-size: 9px; font-weight: 700; }
+.position-news:hover, .position-news:focus-visible { border-color: var(--green); background: #e3eee8; outline: none; }
 .remove { width: 28px; height: 28px; border: 0; background: transparent; color: #a46858; font-size: 18px; }
 .risk-source { display: inline-block; min-width: 72px; padding: 6px 8px; border-radius: 999px; background: #ecece7; color: #59645f; text-align: center; white-space: nowrap; font: 9px var(--font-geist-mono); }
 .risk-source-historical { background: #dcece3; color: #285f48; }

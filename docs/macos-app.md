@@ -11,7 +11,8 @@ web edition remains unchanged.
 - A private SQLite database at
   `~/Library/Application Support/MarketRiskModels/market_risk.db`.
 
-Internet access is used for Yahoo Finance price/history requests and the
+Internet access is used for yfinance price/history requests (with Polygon.io
+fallback) and the
 official U.S. Treasury yield curve. Portfolio data and calculation audit data
 remain on the Mac.
 

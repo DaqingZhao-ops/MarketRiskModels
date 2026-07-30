@@ -67,12 +67,23 @@ async function fetchTreasuryCurve(forceRefresh = false) {
   return { asOf: dateMatch?.[1] ?? now.toISOString(), yields };
 }
 
-async function fetchSeries(
+type MarketSeries = {
+  symbol: string;
+  sourceSymbol: string;
+  dates: string[];
+  adjustedClose: number[];
+  latestPrice?: number;
+  latestPriceAt?: string;
+  currency: string;
+  source: string;
+};
+
+async function fetchYahooSeries(
   symbol: string,
   period1: number,
   period2: number,
   forceRefresh = false,
-) {
+): Promise<MarketSeries> {
   const mapped = sourceSymbol(symbol);
   const url = new URL(
     `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(mapped)}`,
@@ -114,7 +125,94 @@ async function fetchSeries(
       ? new Date(result.meta.regularMarketTime * 1000).toISOString()
       : observations.at(-1)?.date,
     currency: result.meta?.currency ?? "USD",
+    source: "Yahoo Finance fallback",
   };
+}
+
+async function fetchPolygonSeries(
+  symbol: string,
+  period1: number,
+  period2: number,
+  apiKey: string,
+  forceRefresh = false,
+): Promise<MarketSeries> {
+  const mapped = sourceSymbol(symbol);
+  const start = new Date(period1 * 1000).toISOString().slice(0, 10);
+  const end = new Date(period2 * 1000).toISOString().slice(0, 10);
+  const aggregateUrl = new URL(
+    `https://api.polygon.io/v2/aggs/ticker/${encodeURIComponent(mapped)}/range/1/day/${start}/${end}`,
+  );
+  aggregateUrl.searchParams.set("adjusted", "true");
+  aggregateUrl.searchParams.set("sort", "asc");
+  aggregateUrl.searchParams.set("limit", "50000");
+  aggregateUrl.searchParams.set("apiKey", apiKey);
+  const requestInit = forceRefresh
+    ? { cache: "no-store" as const }
+    : { next: { revalidate: 300 } };
+  const aggregateResponse = await fetch(aggregateUrl, requestInit);
+  if (!aggregateResponse.ok) {
+    throw new Error(`${mapped}: Polygon.io request failed (${aggregateResponse.status})`);
+  }
+  const payload = await aggregateResponse.json() as {
+    results?: Array<{ t?: number; c?: number }>;
+    error?: string;
+  };
+  const observations = (payload.results ?? [])
+    .filter((item): item is { t: number; c: number } =>
+      typeof item.t === "number" && typeof item.c === "number" && item.c > 0)
+    .map((item) => ({
+      date: new Date(item.t).toISOString().slice(0, 10),
+      price: item.c,
+    }));
+  if (observations.length < 2) {
+    throw new Error(`${mapped}: ${payload.error ?? "insufficient Polygon.io history"}`);
+  }
+
+  let latestPrice = observations.at(-1)?.price;
+  let latestPriceAt = observations.at(-1)?.date;
+  const latestUrl = new URL(
+    `https://api.polygon.io/v2/last/trade/${encodeURIComponent(mapped)}`,
+  );
+  latestUrl.searchParams.set("apiKey", apiKey);
+  const latestResponse = await fetch(latestUrl, { cache: "no-store" });
+  if (latestResponse.ok) {
+    const latestPayload = await latestResponse.json() as {
+      results?: { p?: number; t?: number };
+    };
+    if (typeof latestPayload.results?.p === "number") {
+      latestPrice = latestPayload.results.p;
+      latestPriceAt = typeof latestPayload.results.t === "number"
+        ? new Date(latestPayload.results.t / 1_000_000).toISOString()
+        : latestPriceAt;
+    }
+  }
+  return {
+    symbol,
+    sourceSymbol: mapped,
+    dates: observations.map((item) => item.date),
+    adjustedClose: observations.map((item) => item.price),
+    latestPrice,
+    latestPriceAt,
+    currency: "USD",
+    source: "Polygon.io",
+  };
+}
+
+async function fetchSeries(
+  symbol: string,
+  period1: number,
+  period2: number,
+  forceRefresh = false,
+) {
+  try {
+    return await fetchYahooSeries(symbol, period1, period2, forceRefresh);
+  } catch {
+    const polygonApiKey = process.env.POLYGON_API_KEY?.trim();
+    if (polygonApiKey) {
+      return fetchPolygonSeries(symbol, period1, period2, polygonApiKey, forceRefresh);
+    }
+    throw new Error(`${sourceSymbol(symbol)}: all configured market-data providers failed`);
+  }
 }
 
 export async function GET(request: NextRequest) {
@@ -139,8 +237,9 @@ export async function GET(request: NextRequest) {
     ]);
     const series = results.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
     if (!series.length) throw new Error("No price history was returned for the imported positions.");
+    const providers = [...new Set(series.map((item) => item.source))];
     return NextResponse.json({
-      source: "Yahoo Finance latest quote and adjusted daily close",
+      source: providers.join(" with "),
       fetchedAt: new Date().toISOString(),
       mappings: Object.fromEntries(series.map((item) => [item.symbol, item.sourceSymbol])),
       series,

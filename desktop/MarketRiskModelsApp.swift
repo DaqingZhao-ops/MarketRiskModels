@@ -15,6 +15,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     private var webProcess: Process?
     private var pythonProcess: Process?
     private var logHandle: FileHandle?
+    private var articleWindows: [NSWindow] = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         buildWindow()
@@ -206,6 +207,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         panel.beginSheetModal(for: window) { response in
             completionHandler(response == .OK ? panel.urls : nil)
         }
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        createWebViewWith configuration: WKWebViewConfiguration,
+        for navigationAction: WKNavigationAction,
+        windowFeatures: WKWindowFeatures
+    ) -> WKWebView? {
+        guard navigationAction.targetFrame == nil else { return nil }
+
+        let frame = NSRect(x: 0, y: 0, width: 1100, height: 800)
+        let articleWebView = WKWebView(frame: frame, configuration: configuration)
+        articleWebView.navigationDelegate = self
+        articleWebView.uiDelegate = self
+        articleWebView.autoresizingMask = [.width, .height]
+
+        let articleWindow = NSWindow(
+            contentRect: frame,
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        articleWindow.title = "Yahoo Finance Article"
+        articleWindow.contentView = articleWebView
+        articleWindow.isReleasedWhenClosed = false
+        articleWindow.center()
+        articleWindow.makeKeyAndOrderFront(nil)
+        articleWindows.append(articleWindow)
+
+        return articleWebView
     }
 }
 

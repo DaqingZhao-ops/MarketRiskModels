@@ -34,6 +34,8 @@ class PortfolioPayload(BaseModel):
 MARKET_INDICATORS = [
     ("S&P 500", "^GSPC", "index"),
     ("Dow", "^DJI", "index"),
+    ("Nasdaq Composite", "^IXIC", "index"),
+    ("CBOE Volatility Index", "^VIX", "index"),
     ("Nikkei 225", "^N225", "index"),
     ("FTSE 100", "^FTSE", "index"),
     ("DAX", "^GDAXI", "index"),
@@ -54,6 +56,19 @@ INDEX_FUTURES = {
     "^N225": ("Nikkei 225 Futures", "NKD=F"),
 }
 
+MARKET_NEWS_QUERIES = [
+    "stock market",
+    "global markets",
+    "Federal Reserve markets",
+    "corporate earnings",
+    "technology stocks",
+    "Treasury bond market",
+    "commodities markets",
+    "currency markets",
+    "economic outlook",
+    "market volatility",
+]
+
 
 def parse_market_indicator(
     label: str,
@@ -64,18 +79,33 @@ def parse_market_indicator(
     result = payload["chart"]["result"][0]
     meta = result["meta"]
     price = float(meta["regularMarketPrice"])
-    previous = float(meta.get("chartPreviousClose") or meta.get("previousClose") or price)
-    change = price - previous
     closes = result.get("indicators", {}).get("quote", [{}])[0].get("close", [])
     trend = [float(value) for value in closes if value is not None and math.isfinite(float(value))]
+    # chartPreviousClose is the close immediately before the requested chart
+    # range, not necessarily the previous trading session. Prefer the daily
+    # series so change figures remain correct for international indices.
+    latest_is_current = bool(trend) and math.isclose(
+        trend[-1],
+        price,
+        rel_tol=1e-6,
+        abs_tol=1e-6,
+    )
+    if latest_is_current and len(trend) >= 2:
+        previous = trend[-2]
+    elif trend:
+        previous = trend[-1]
+    else:
+        previous = float(meta.get("previousClose") or meta.get("chartPreviousClose") or price)
+    change = price - previous
     return {
         "label": label,
         "symbol": symbol,
         "value": price,
+        "previousClose": previous,
         "change": change,
         "percentChange": change / previous if previous else 0,
         "unit": unit,
-        "marketState": meta.get("marketState", "DELAYED"),
+        "marketState": meta.get("marketState") or "DELAYED",
         "asOf": datetime.fromtimestamp(
             int(meta.get("regularMarketTime") or datetime.now(timezone.utc).timestamp()),
             timezone.utc,
@@ -87,10 +117,26 @@ def parse_market_indicator(
 def parse_yahoo_headlines(xml: str) -> list[dict[str, str]]:
     root = ElementTree.fromstring(xml)
     headlines = []
-    for item in root.findall(".//item")[:5]:
+    for item in root.findall(".//item")[:25]:
         title = html.unescape((item.findtext("title") or "").strip())
         link = (item.findtext("link") or "").strip()
         published = (item.findtext("pubDate") or "").strip()
+        if title and link:
+            headlines.append({"title": title, "url": link, "publishedAt": published})
+    return headlines
+
+
+def parse_yahoo_search_headlines(payload: dict[str, Any]) -> list[dict[str, str]]:
+    headlines = []
+    for item in payload.get("news", []):
+        title = html.unescape(str(item.get("title") or "").strip())
+        link = str(item.get("link") or "").strip()
+        published_timestamp = item.get("providerPublishTime")
+        published = (
+            datetime.fromtimestamp(int(published_timestamp), timezone.utc).isoformat()
+            if published_timestamp
+            else ""
+        )
         if title and link:
             headlines.append({"title": title, "url": link, "publishedAt": published})
     return headlines
@@ -148,6 +194,37 @@ async def market_briefing() -> dict[str, Any]:
             "Quotes may be delayed and are for situational awareness, not trade execution.",
             "^IRX is the 13-week Treasury-bill yield used as a money-market-rate proxy.",
         ],
+    }
+
+
+@router.get("/market/headlines")
+async def more_market_headlines(batch: int = Query(0, ge=0)) -> dict[str, Any]:
+    query = MARKET_NEWS_QUERIES[batch % len(MARKET_NEWS_QUERIES)]
+    headers = {"User-Agent": "Mozilla/5.0 MarketRiskModels/0.2"}
+    try:
+        async with httpx.AsyncClient(
+            timeout=15,
+            headers=headers,
+            follow_redirects=True,
+        ) as client:
+            response = await client.get(
+                "https://query1.finance.yahoo.com/v1/finance/search",
+                params={"q": query, "quotesCount": 0, "newsCount": 15},
+            )
+            response.raise_for_status()
+            headlines = parse_yahoo_search_headlines(response.json())
+    except Exception as error:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Additional Yahoo Finance headlines unavailable: {error}",
+        ) from error
+
+    return {
+        "source": "Yahoo Finance",
+        "query": query,
+        "batch": batch,
+        "nextBatch": batch + 1,
+        "headlines": headlines,
     }
 
 
@@ -247,12 +324,13 @@ async def market_history(
             "latestPriceAt": records[-1].trading_date.isoformat(),
             "retrievedAt": records[-1].retrieved_at.isoformat(),
             "currency": "USD",
+            "provider": records[-1].source,
         })
     if not series:
         raise HTTPException(status_code=502, detail="No price history was returned.")
     return {
         "source": (
-            "Yahoo Finance latest quote and adjusted daily close "
+            f"{', '.join(sorted({item['provider'] for item in series}))} "
             f"({'fresh download' if refresh else 'local Python cache'})"
         ),
         "fetchedAt": datetime.now(timezone.utc).isoformat(),

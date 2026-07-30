@@ -35,6 +35,7 @@ test("server-renders the market risk workbench", async () => {
   assert.match(html, /Live market briefing/);
   assert.match(html, /Yahoo Finance headlines/);
   assert.match(html, /Refresh market data/);
+  assert.match(html, /Load more headlines/);
   assert.match(html, /13-week Treasury-bill yield/);
   assert.match(html, /Loading live market indicators/);
   assert.match(html, /30-day market trends/);
@@ -68,6 +69,7 @@ test("server-renders the market risk workbench", async () => {
   assert.match(html, /Risk source/);
   assert.match(html, /Sort by Symbol/);
   assert.match(html, /Drag to move AAPL/);
+  assert.match(html, /News for AAPL/);
   assert.match(html, /Click a column heading to sort/);
   assert.match(html, /Calculating…/);
   assert.match(html, /Important limitation/);

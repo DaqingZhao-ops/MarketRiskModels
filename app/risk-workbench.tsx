@@ -70,6 +70,7 @@ type MarketIndicatorQuote = {
   label: string;
   symbol: string;
   value: number;
+  previousClose: number;
   change: number;
   percentChange: number;
   unit: "index" | "percent" | "fx" | "gold" | "oil";
@@ -150,21 +151,71 @@ function openNewsArticle(event: MouseEvent<HTMLAnchorElement>, url: string) {
     return;
   }
 
+  if (openPopupWindow(url, "yahoo-finance-article")) {
+    event.preventDefault();
+  }
+}
+
+function openPopupWindow(url: string, name: string) {
   const width = Math.min(1100, window.screen.availWidth);
   const height = Math.min(800, window.screen.availHeight);
   const left = Math.max(0, Math.round((window.screen.availWidth - width) / 2));
   const top = Math.max(0, Math.round((window.screen.availHeight - height) / 2));
-  const articleWindow = window.open(
+  const popupWindow = window.open(
     url,
-    "yahoo-finance-article",
+    name,
     `popup=yes,width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes`,
   );
 
-  if (articleWindow) {
-    event.preventDefault();
-    articleWindow.opener = null;
-    articleWindow.focus();
+  if (popupWindow) {
+    popupWindow.opener = null;
+    popupWindow.focus();
+    return true;
   }
+
+  return false;
+}
+
+function openAssetNews(event: MouseEvent<HTMLButtonElement>, symbol: string) {
+  event.stopPropagation();
+  const ticker = symbol.trim().split(/\s+/)[0] || symbol.trim();
+  const query = encodeURIComponent(`${ticker} financial news`);
+  openPopupWindow(`https://news.google.com/search?q=${query}`, "asset-news-search");
+}
+
+function openMarketIndexNews(label: string) {
+  const query = encodeURIComponent(`${label} index financial news`);
+  openPopupWindow(`https://news.google.com/search?q=${query}`, "market-index-news-search");
+}
+
+function formatMarketIndicatorValue(value: number, unit: MarketIndicatorQuote["unit"]) {
+  if (unit === "percent") return `${value.toFixed(3)}%`;
+  if (unit === "fx") return value.toFixed(4);
+  if (unit === "gold") {
+    return `$${value.toLocaleString("en-US", { maximumFractionDigits: 2 })}/oz`;
+  }
+  if (unit === "oil") return `$${value.toFixed(2)}/bbl`;
+  return value.toLocaleString("en-US", { maximumFractionDigits: 2 });
+}
+
+function formatMarketPriceTimestamp(value: string) {
+  const tradingDate = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (tradingDate) {
+    const [, year, month, day] = tradingDate;
+    const date = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)));
+    return `${date.toLocaleDateString([], {
+      month: "short",
+      day: "numeric",
+      year: Number(year) === new Date().getFullYear() ? undefined : "numeric",
+      timeZone: "UTC",
+    })} close`;
+  }
+  return new Date(value).toLocaleString([], {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
 }
 
 function MarketSparkline({ values }: { values: number[] }) {
@@ -479,6 +530,10 @@ export function RiskWorkbench() {
   const [marketBriefing, setMarketBriefing] = useState<MarketBriefing>();
   const [marketBriefingError, setMarketBriefingError] = useState("");
   const [marketBriefingRefreshing, setMarketBriefingRefreshing] = useState(false);
+  const [headlinePage, setHeadlinePage] = useState(0);
+  const [headlineBatch, setHeadlineBatch] = useState(0);
+  const [headlinesLoading, setHeadlinesLoading] = useState(false);
+  const [headlineLoadError, setHeadlineLoadError] = useState("");
   const [historyStatus, setHistoryStatus] = useState("Loading market history…");
   const [remoteResult, setRemoteResult] = useState<RiskResult>();
   const [riskTrend, setRiskTrend] = useState<RiskTrend>();
@@ -523,12 +578,52 @@ export function RiskWorkbench() {
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.detail ?? "Market briefing is unavailable.");
       setMarketBriefing(payload as MarketBriefing);
+      setHeadlinePage(0);
+      setHeadlineBatch(0);
+      setHeadlineLoadError("");
     } catch (error) {
       if (!signal?.aborted) {
         setMarketBriefingError(error instanceof Error ? error.message : "Market briefing is unavailable.");
       }
     } finally {
       if (!signal?.aborted) setMarketBriefingRefreshing(false);
+    }
+  }
+
+  async function showNextHeadlines() {
+    if (headlinePage + 1 < headlinePageCount) {
+      setHeadlinePage((current) => current + 1);
+      return;
+    }
+
+    setHeadlinesLoading(true);
+    setHeadlineLoadError("");
+    try {
+      const response = await fetch(apiUrl(`/api/market/headlines?batch=${headlineBatch}`), {
+        cache: "no-store",
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.detail ?? "More headlines are unavailable.");
+
+      const existingUrls = new Set(marketBriefing?.headlines.map((headline) => headline.url) ?? []);
+      const additionalHeadlines = (payload.headlines as MarketBriefing["headlines"])
+        .filter((headline) => !existingUrls.has(headline.url));
+      setHeadlineBatch(Number(payload.nextBatch));
+
+      if (!additionalHeadlines.length) {
+        setHeadlineLoadError("No new articles were returned for this batch. Click again to try another market topic.");
+        return;
+      }
+
+      setMarketBriefing((current) => current ? {
+        ...current,
+        headlines: [...current.headlines, ...additionalHeadlines],
+      } : current);
+      setHeadlinePage((current) => current + 1);
+    } catch (error) {
+      setHeadlineLoadError(error instanceof Error ? error.message : "More headlines are unavailable.");
+    } finally {
+      setHeadlinesLoading(false);
     }
   }
 
@@ -1150,6 +1245,10 @@ export function RiskWorkbench() {
     setImportBusy(false);
   }
 
+  const headlinePageCount = Math.ceil((marketBriefing?.headlines.length ?? 0) / 5);
+  const headlineStart = headlinePage * 5;
+  const visibleHeadlines = marketBriefing?.headlines.slice(headlineStart, headlineStart + 5) ?? [];
+
   return (
     <main>
       <header className="topbar">
@@ -1172,25 +1271,34 @@ export function RiskWorkbench() {
       <section className="market-briefing" aria-label="Live market briefing with 30-day market trends">
         <div className="market-indicators">
           {marketBriefing?.indicators.length ? marketBriefing.indicators.map((indicator) => (
-            <article key={indicator.symbol}>
+            <article
+              key={indicator.symbol}
+              role="button"
+              tabIndex={0}
+              aria-label={`Search news for ${indicator.label}`}
+              title={`Search news for ${indicator.label}`}
+              onClick={() => openMarketIndexNews(indicator.label)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  openMarketIndexNews(indicator.label);
+                }
+              }}
+            >
               <span>{indicator.label}</span>
-              <strong>
-                {indicator.unit === "percent"
-                  ? `${indicator.value.toFixed(3)}%`
-                  : indicator.unit === "fx"
-                    ? indicator.value.toFixed(4)
-                    : indicator.unit === "gold"
-                      ? `$${indicator.value.toLocaleString("en-US", { maximumFractionDigits: 2 })}/oz`
-                      : indicator.unit === "oil"
-                        ? `$${indicator.value.toFixed(2)}/bbl`
-                        : indicator.value.toLocaleString("en-US", { maximumFractionDigits: 2 })}
-              </strong>
+              <strong>{formatMarketIndicatorValue(indicator.value, indicator.unit)}</strong>
               <MarketSparkline values={indicator.trend} />
-              <small className={indicator.change >= 0 ? "market-up" : "market-down"}>
-                {indicator.change >= 0 ? "+" : ""}
-                {indicator.unit === "percent"
-                  ? `${indicator.change.toFixed(3)} pts`
-                  : `${indicator.change.toFixed(2)} (${percent.format(indicator.percentChange)})`}
+              <small>
+                <span className={indicator.change >= 0 ? "market-up" : "market-down"}>
+                  {indicator.change >= 0 ? "+" : ""}
+                  {indicator.unit === "percent"
+                    ? `${indicator.change.toFixed(3)} pts`
+                    : `${indicator.change.toFixed(2)} (${percent.format(indicator.percentChange)})`}
+                  {" "}vs previous close
+                </span>
+                <span className="market-previous-close">
+                  Previous close {formatMarketIndicatorValue(indicator.previousClose, indicator.unit)}
+                </span>
               </small>
               <em>
                 {indicator.marketState.toLowerCase()} · as of{" "}
@@ -1232,17 +1340,39 @@ export function RiskWorkbench() {
           <header>
             <span>Yahoo Finance headlines</span>
             <small>{marketBriefing ? `Updated ${new Date(marketBriefing.fetchedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : "Loading…"}</small>
-            <button
-              type="button"
-              onClick={() => void refreshMarketBriefing()}
-              disabled={marketBriefingRefreshing}
-            >
-              {marketBriefingRefreshing ? "Refreshing…" : "Refresh market data"}
-            </button>
+            {marketBriefing?.headlines.length ? (
+              <small>
+                Showing {headlineStart + 1}–{Math.min(headlineStart + 5, marketBriefing.headlines.length)} of{" "}
+                {marketBriefing.headlines.length}
+              </small>
+            ) : null}
+            <div className="headline-actions">
+              <button
+                className="headline-refresh"
+                type="button"
+                onClick={() => void refreshMarketBriefing()}
+                disabled={marketBriefingRefreshing}
+              >
+                {marketBriefingRefreshing ? "Refreshing…" : "Refresh market data"}
+              </button>
+              <button
+                className="headline-next"
+                type="button"
+                onClick={() => void showNextHeadlines()}
+                disabled={!marketBriefing?.headlines.length || headlinesLoading}
+                aria-busy={headlinesLoading}
+              >
+                {headlinesLoading
+                  ? "Loading more…"
+                  : headlinePage + 1 >= headlinePageCount
+                    ? "Load more headlines"
+                    : "Next 5 headlines"}
+              </button>
+            </div>
           </header>
-          {marketBriefing?.headlines.length ? (
-            <ol>
-              {marketBriefing.headlines.slice(0, 5).map((headline) => (
+          {visibleHeadlines.length ? (
+            <ol style={{ counterReset: `headlines ${headlineStart}` }}>
+              {visibleHeadlines.map((headline) => (
                 <li key={headline.url}>
                   <a
                     href={headline.url}
@@ -1258,6 +1388,9 @@ export function RiskWorkbench() {
           ) : <p>{marketBriefingError || "Loading five current headlines…"}</p>}
           {marketBriefing?.warnings.length ? (
             <small className="market-feed-warning">{marketBriefing.warnings.join(" ")}</small>
+          ) : null}
+          {headlineLoadError ? (
+            <small className="market-feed-warning">{headlineLoadError}</small>
           ) : null}
         </div>
         <p className="market-disclosure">
@@ -1828,7 +1961,7 @@ export function RiskWorkbench() {
                 <th aria-sort={positionSort?.field === "beta" ? `${positionSort.direction}ending` : "none"}>{sortLabel("Beta", "beta")}</th>
                 <th aria-sort={positionSort?.field === "delta" ? `${positionSort.direction}ending` : "none"}>{sortLabel("Delta", "delta")}</th>
                 <th aria-sort={positionSort?.field === "riskSource" ? `${positionSort.direction}ending` : "none"}>{sortLabel("Risk source", "riskSource")}</th>
-                <th aria-label="Actions" />
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -1913,7 +2046,7 @@ export function RiskWorkbench() {
                               : "Market quote"
                         }</em>
                         <small>{position.marketPriceAt
-                          ? new Date(position.marketPriceAt).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })
+                          ? formatMarketPriceTimestamp(position.marketPriceAt)
                           : "Latest available"}</small>
                       </span>
                     ) : (
@@ -1945,7 +2078,27 @@ export function RiskWorkbench() {
                       {position.riskSource ? riskSourceLabels[position.riskSource] : "Sample"}
                     </span>
                   </td>
-                  <td><button className="remove" aria-label={`Remove ${position.symbol}`} onClick={() => setPositions((current) => current.filter((item) => item.id !== position.id))}>×</button></td>
+                  <td>
+                    <div className="position-actions">
+                      <button
+                        className="position-news"
+                        type="button"
+                        aria-label={`News for ${position.symbol}`}
+                        title={`Search news for ${position.symbol}`}
+                        onClick={(event) => openAssetNews(event, position.symbol)}
+                      >
+                        News
+                      </button>
+                      <button
+                        className="remove"
+                        type="button"
+                        aria-label={`Remove ${position.symbol}`}
+                        onClick={() => setPositions((current) => current.filter((item) => item.id !== position.id))}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>

@@ -9,12 +9,14 @@ from market_risk.models import RiskRun
 
 def test_parses_market_briefing_quotes_and_headlines() -> None:
     assert [
+        ("Nasdaq Composite", "^IXIC", "index"),
+        ("CBOE Volatility Index", "^VIX", "index"),
         ("Nikkei 225", "^N225", "index"),
         ("FTSE 100", "^FTSE", "index"),
         ("DAX", "^GDAXI", "index"),
         ("Hang Seng", "^HSI", "index"),
         ("Shanghai Composite", "000001.SS", "index"),
-    ] == desktop_api.MARKET_INDICATORS[2:7]
+    ] == desktop_api.MARKET_INDICATORS[2:9]
     assert desktop_api.INDEX_FUTURES == {
         "^GSPC": ("S&P 500 Futures", "ES=F"),
         "^DJI": ("Dow Futures", "YM=F"),
@@ -39,10 +41,36 @@ def test_parses_market_briefing_quotes_and_headlines() -> None:
             },
         },
     )
+    assert quote["previousClose"] == 6450
     assert quote["change"] == 50
     assert quote["percentChange"] == 50 / 6450
     assert quote["marketState"] == "REGULAR"
     assert quote["trend"] == [6400, 6450, 6500]
+
+    shanghai = desktop_api.parse_market_indicator(
+        "Shanghai Composite",
+        "000001.SS",
+        "index",
+        {
+            "chart": {
+                "result": [{
+                    "meta": {
+                        "regularMarketPrice": 3814.282,
+                        "chartPreviousClose": 4094.397,
+                        "regularMarketTime": 1785378390,
+                    },
+                    "indicators": {
+                        "quote": [{
+                            "close": [3813.315, 3828.469, 3814.282],
+                        }],
+                    },
+                }],
+            },
+        },
+    )
+    assert shanghai["previousClose"] == 3828.469
+    assert shanghai["change"] == 3814.282 - 3828.469
+    assert shanghai["marketState"] == "DELAYED"
 
     headlines = desktop_api.parse_yahoo_headlines("""
         <rss><channel>
@@ -52,6 +80,39 @@ def test_parses_market_briefing_quotes_and_headlines() -> None:
     """)
     assert headlines[0]["title"] == "Markets & rates"
     assert len(headlines) == 2
+
+
+def test_parses_multiple_headline_pages() -> None:
+    items = "".join(
+        f"<item><title>Headline {index}</title><link>https://example.com/{index}</link>"
+        f"<pubDate>Sun, 26 Jul 2026 12:{index:02d}:00 GMT</pubDate></item>"
+        for index in range(12)
+    )
+
+    headlines = desktop_api.parse_yahoo_headlines(f"<rss><channel>{items}</channel></rss>")
+
+    assert len(headlines) == 12
+    assert headlines[5]["title"] == "Headline 5"
+    assert headlines[10]["title"] == "Headline 10"
+
+
+def test_parses_yahoo_search_headlines() -> None:
+    headlines = desktop_api.parse_yahoo_search_headlines({
+        "news": [
+            {
+                "title": "Stocks &amp; rates",
+                "link": "https://finance.yahoo.com/news/example",
+                "providerPublishTime": 1785071460,
+            },
+            {"title": "Missing URL"},
+        ],
+    })
+
+    assert headlines == [{
+        "title": "Stocks & rates",
+        "url": "https://finance.yahoo.com/news/example",
+        "publishedAt": "2026-07-26T13:11:00+00:00",
+    }]
 
 
 def test_health_and_parametric_risk_are_audited() -> None:

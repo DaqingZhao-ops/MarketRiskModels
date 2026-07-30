@@ -4,6 +4,7 @@ const configuredBackendBase =
 const desktopPaths: Record<string, string> = {
   "/api/history": "/api/v1/market/history",
   "/api/market/briefing": "/api/v1/market/briefing",
+  "/api/market/headlines": "/api/v1/market/headlines",
   "/api/portfolios": "/api/v1/portfolios",
   "/api/rates": "/api/v1/rates",
   "/api/risk": "/api/v1/risk/calculate",
