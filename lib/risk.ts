@@ -73,6 +73,31 @@ export type RiskResult = {
   runId?: number;
 };
 
+export type FixedPortfolioBackcast = {
+  mode: "fixedPortfolioBackcast";
+  days: number;
+  lookback: number;
+  asOf: string;
+  points: Array<{
+    runId: number;
+    timestamp: string;
+    marketValue: number;
+    var: number;
+    varPercent: number;
+    expectedShortfall: number;
+    dailyVolatility: number;
+    portfolioBeta?: number;
+    contributions: Array<{
+      symbol: string;
+      amount: number;
+      share: number;
+      change: number | null;
+      changePercent: number | null;
+    }>;
+  }>;
+  assumptions: string[];
+};
+
 export type FrontierPoint = {
   risk: number;
   return: number;
@@ -893,6 +918,165 @@ export function calculateRisk(
     historyEnd: historyDates.at(-1),
     varFloor,
     varFloorApplied,
+  };
+}
+
+export function calculateFixedPortfolioBackcast(
+  positions: Position[],
+  model: ModelKind,
+  confidence: number,
+  horizon: number,
+  history: HistoricalData,
+  days = 30,
+  lookback = 252,
+): FixedPortfolioBackcast {
+  const requiredSymbols = [...new Set([...positions.map((position) => position.symbol), "SPY"])];
+  const seriesBySymbol = new Map(history.series.map((series) => [series.symbol, series]));
+  const missing = requiredSymbols.filter((symbol) => !seriesBySymbol.has(symbol));
+  if (missing.length) {
+    throw new Error(`Missing price history for: ${missing.join(", ")}`);
+  }
+  const commonDates = [...seriesBySymbol.get(requiredSymbols[0])!.dates]
+    .filter((date) => requiredSymbols.every((symbol) =>
+      seriesBySymbol.get(symbol)!.dates.includes(date)))
+    .sort();
+  const minimum = lookback + horizon;
+  if (commonDates.length <= minimum) {
+    throw new Error(
+      `Backcast requires more than ${minimum} synchronized observations; received ${commonDates.length}.`,
+    );
+  }
+  const priceMaps = new Map(requiredSymbols.map((symbol) => {
+    const series = seriesBySymbol.get(symbol)!;
+    return [symbol, new Map(series.dates.map((date, index) => [
+      date,
+      series.adjustedClose[index],
+    ]))] as const;
+  }));
+  const asOfDates = commonDates.slice(minimum).slice(-days);
+  const latestDate = commonDates.at(-1)!;
+  const previousContributions = new Map<string, number>();
+  const points = asOfDates.map((asOf, pointIndex) => {
+    const asOfIndex = commonDates.indexOf(asOf);
+    const windowDates = commonDates.slice(asOfIndex - lookback, asOfIndex + 1);
+    const riskDates = commonDates.slice(0, asOfIndex + 1);
+    const slicedHistory: HistoricalData = {
+      ...history,
+      series: history.series.map((series) => {
+        const prices = new Map(series.dates.map((date, index) => [
+          date,
+          series.adjustedClose[index],
+        ]));
+        const dates = riskDates.filter((date) => prices.has(date));
+        return {
+          ...series,
+          dates,
+          adjustedClose: dates.map((date) => prices.get(date)!),
+          latestPrice: prices.get(asOf),
+          latestPriceAt: asOf,
+        };
+      }),
+    };
+    const benchmarkSeries = slicedHistory.series.find((series) => series.symbol === "SPY")!;
+    const adjustedPositions = positions.map((position) => {
+      const prices = priceMaps.get(position.symbol)!;
+      const latestPrice = prices.get(latestDate)!;
+      const asOfPrice = prices.get(asOf)!;
+      const windowSeries = {
+        ...seriesBySymbol.get(position.symbol)!,
+        dates: windowDates,
+        adjustedClose: windowDates.map((date) => prices.get(date)!),
+      };
+      const volatility = historicalDeviation(
+        dailyReturns(windowSeries).map((observation) => observation.value),
+      ) * Math.sqrt(252);
+      const beta = historicalBeta(windowSeries, {
+        ...benchmarkSeries,
+        dates: windowDates,
+        adjustedClose: windowDates.map((date) => priceMaps.get("SPY")!.get(date)!),
+      });
+      const revaluation = asOfPrice / latestPrice;
+      const directlyRevalued = ["Stock", "ETF", "Mutual Fund"].includes(position.type);
+      return {
+        ...position,
+        price: directlyRevalued ? asOfPrice : position.price * revaluation,
+        marketValue: directlyRevalued
+          ? Math.abs(position.quantity * asOfPrice * position.multiplier)
+          : position.marketValue * revaluation,
+        volatility: Number.isFinite(volatility) && volatility > 0
+          ? volatility
+          : position.volatility,
+        beta: Number.isFinite(beta) ? beta : position.beta,
+      };
+    });
+    const result = calculateRisk(
+      adjustedPositions,
+      model,
+      confidence,
+      horizon,
+      slicedHistory,
+    );
+    const portfolioBeta = calculatePortfolioAlphaBeta(
+      adjustedPositions,
+      {
+        ...slicedHistory,
+        series: slicedHistory.series.map((series) => {
+          const prices = priceMaps.get(series.symbol);
+          if (!prices) return series;
+          return {
+            ...series,
+            dates: windowDates,
+            adjustedClose: windowDates.map((date) => prices.get(date)!),
+          };
+        }),
+      },
+    )?.beta;
+    const contributions = new Map<string, { symbol: string; amount: number; share: number }>();
+    for (const item of result.contributions) {
+      const aggregate = contributions.get(item.symbol) ?? {
+        symbol: item.symbol,
+        amount: 0,
+        share: 0,
+      };
+      aggregate.amount += item.amount;
+      aggregate.share += item.share;
+      contributions.set(item.symbol, aggregate);
+    }
+    const serializedContributions = [...contributions.values()].map((contribution) => {
+      const previous = previousContributions.get(contribution.symbol);
+      previousContributions.set(contribution.symbol, contribution.amount);
+      return {
+        ...contribution,
+        change: previous === undefined ? null : contribution.amount - previous,
+        changePercent: previous
+          ? (contribution.amount - previous) / Math.abs(previous)
+          : null,
+      };
+    }).sort((left, right) => Math.abs(right.amount) - Math.abs(left.amount));
+    return {
+      runId: pointIndex + 1,
+      timestamp: `${asOf}T00:00:00Z`,
+      marketValue: result.marketValue,
+      var: result.var,
+      varPercent: result.marketValue ? result.var / result.marketValue : 0,
+      expectedShortfall: result.expectedShortfall,
+      dailyVolatility: result.dailyVolatility,
+      portfolioBeta,
+      contributions: serializedContributions,
+    };
+  });
+  return {
+    mode: "fixedPortfolioBackcast",
+    days,
+    lookback,
+    asOf: asOfDates.at(-1)!,
+    points,
+    assumptions: [
+      "Current quantities are held fixed throughout the backcast.",
+      "Market values are scaled by each instrument's mapped price history.",
+      "Volatility and beta use trailing synchronized observations only.",
+      "Option delta is held at its current value.",
+    ],
   };
 }
 

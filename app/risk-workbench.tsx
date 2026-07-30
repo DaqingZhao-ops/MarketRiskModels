@@ -10,6 +10,7 @@ import {
   EfficientFrontierResult,
   calculateRisk,
   calculateEfficientFrontier,
+  calculateFixedPortfolioBackcast,
   calculatePortfolioAlphaBeta,
   enrichPositionsWithHistoricalRisk,
   parsePositionsCsv,
@@ -907,6 +908,28 @@ export function RiskWorkbench() {
         );
       }).catch((error) => {
         if (controller.signal.aborted) return;
+        if (history) {
+          try {
+            const payload = calculateFixedPortfolioBackcast(
+              positions,
+              model,
+              confidence,
+              horizon,
+              history,
+            );
+            setBackcastTrend(payload as BackcastTrend);
+            setBackcastStatus(
+              `${payload.points.length} trading-day browser backcast · ${payload.lookback}-day factor window`,
+            );
+            return;
+          } catch (fallbackError) {
+            setBackcastTrend(undefined);
+            setBackcastStatus(
+              fallbackError instanceof Error ? fallbackError.message : "Browser backcast unavailable.",
+            );
+            return;
+          }
+        }
         setBackcastTrend(undefined);
         setBackcastStatus(error instanceof Error ? error.message : "Backcast unavailable.");
       });
@@ -915,7 +938,7 @@ export function RiskWorkbench() {
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [confidence, horizon, model, portfolioLoaded, positions]);
+  }, [confidence, history, horizon, model, portfolioLoaded, positions]);
   const activeRiskTrend = remoteResult?.runId ? riskTrend : undefined;
   const activeRiskTrendStatus = remoteResult?.runId
     ? riskTrendStatus
