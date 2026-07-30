@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   calculateEfficientFrontier,
+  calculateFixedPortfolioBackcast,
   calculatePortfolioAlphaBeta,
   calculateRisk,
   enrichPositionsWithHistoricalRisk,
@@ -15,6 +16,45 @@ import {
   hullWhiteDiscountFactor,
   isHullWhiteStale,
 } from "../lib/hull-white.ts";
+
+test("builds a 30-day browser backcast with VaR and portfolio beta", () => {
+  const dates = Array.from({ length: 320 }, (_, index) =>
+    new Date(Date.UTC(2025, 0, index + 1)).toISOString().slice(0, 10));
+  const spyPrices = dates.map((_, index) =>
+    500 * Math.exp(index * 0.0004 + Math.sin(index / 7) * 0.012));
+  const assetPrices = dates.map((_, index) =>
+    100 * Math.exp(index * 0.0006 + Math.sin(index / 7) * 0.018 + Math.cos(index / 13) * 0.004));
+  const position = {
+    id: "aaa",
+    symbol: "AAA",
+    type: "Stock",
+    quantity: 100,
+    price: assetPrices.at(-1),
+    multiplier: 1,
+    marketValue: 100 * assetPrices.at(-1),
+    volatility: 0.2,
+    beta: 1,
+    delta: 1,
+  };
+  const result = calculateFixedPortfolioBackcast(
+    [position],
+    "historical",
+    0.99,
+    1,
+    {
+      source: "test",
+      fetchedAt: "2026-01-01",
+      mappings: { AAA: "AAA", SPY: "SPY" },
+      series: [
+        { symbol: "AAA", sourceSymbol: "AAA", dates, adjustedClose: assetPrices },
+        { symbol: "SPY", sourceSymbol: "SPY", dates, adjustedClose: spyPrices },
+      ],
+    },
+  );
+  assert.equal(result.points.length, 30);
+  assert.ok(result.points.every((point) => Number.isFinite(point.var)));
+  assert.ok(result.points.every((point) => Number.isFinite(point.portfolioBeta)));
+});
 
 const optionRateCalibration = fitHullWhiteCurve([
   { maturity: 0.25, yield: 0.04 },
