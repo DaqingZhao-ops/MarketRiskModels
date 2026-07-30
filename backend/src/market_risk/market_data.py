@@ -163,7 +163,10 @@ def is_fresh(session: Session, symbol: str, cache_hours: int) -> bool:
     newest = session.scalar(
         select(MarketPrice)
         .where(MarketPrice.requested_symbol == symbol.strip().upper())
-        .order_by(MarketPrice.retrieved_at.desc())
+        .order_by(
+            MarketPrice.retrieved_at.desc(),
+            MarketPrice.trading_date.desc(),
+        )
         .limit(1),
     )
     if newest is None:
@@ -171,6 +174,10 @@ def is_fresh(session: Session, symbol: str, cache_hours: int) -> bool:
     # A cached backup-provider result must not prevent the preferred provider
     # from being retried after provider priority or entitlements change.
     if newest.source != YFINANCE_SOURCE:
+        return False
+    # Rows created before provider timestamps were persisted need one refresh
+    # so the UI can replace a date-only label with the actual quote time.
+    if newest.observed_at is None:
         return False
     retrieved_at = newest.retrieved_at
     if retrieved_at.tzinfo is None:
