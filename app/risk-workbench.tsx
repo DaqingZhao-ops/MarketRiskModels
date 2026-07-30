@@ -681,6 +681,8 @@ export function RiskWorkbench() {
             marketPriceSource: undefined,
             modelPrice: undefined,
             modelPriceSource: undefined,
+            priceToFreeCashFlow: undefined,
+            fundamentalsAt: undefined,
             marketPriceModel: undefined,
             marketPriceRate: undefined,
             marketPriceRateTenor: undefined,
@@ -733,6 +735,14 @@ export function RiskWorkbench() {
       .join(","),
     [positions],
   );
+  const stockSymbolsKey = useMemo(
+    () => [...new Set(positions
+      .filter((position) => position.type === "Stock")
+      .map((position) => position.symbol.trim().toUpperCase()))]
+      .sort()
+      .join(","),
+    [positions],
+  );
 
   const loadPositionMarketData = useCallback(async (
     signal: AbortSignal,
@@ -745,6 +755,7 @@ export function RiskWorkbench() {
       : "Loading market history…");
     try {
       const query = new URLSearchParams({ symbols: symbolsKey });
+      if (stockSymbolsKey) query.set("fundamentals", stockSymbolsKey);
       if (forceRefresh) query.set("refresh", "1");
       const response = await fetch(apiUrl(`/api/history?${query}`), {
         signal,
@@ -799,7 +810,7 @@ export function RiskWorkbench() {
     } finally {
       if (forceRefresh && !signal.aborted) setPositionsRefreshing(false);
     }
-  }, [rateCalibration, rateModelLoaded, symbolsKey]);
+  }, [rateCalibration, rateModelLoaded, stockSymbolsKey, symbolsKey]);
 
   async function refreshPositionMarketData() {
     const controller = new AbortController();
@@ -1123,6 +1134,8 @@ export function RiskWorkbench() {
           updated.marketPriceSource = undefined;
           updated.modelPrice = undefined;
           updated.modelPriceSource = undefined;
+          updated.priceToFreeCashFlow = undefined;
+          updated.fundamentalsAt = undefined;
           updated.marketPriceModel = undefined;
           updated.marketPriceRate = undefined;
           updated.marketPriceRateTenor = undefined;
@@ -2124,6 +2137,16 @@ export function RiskWorkbench() {
                             {marketMoney.format(position.marketPrice - position.modelPrice)}
                           </small>
                         ) : null}
+                        <small className="fundamental-metric" title={
+                          position.fundamentalsAt
+                            ? `Trailing free cash flow through ${position.fundamentalsAt}`
+                            : "Trailing free cash flow unavailable or not applicable"
+                        }>
+                          P/FCF {position.type === "Stock" &&
+                            position.priceToFreeCashFlow !== undefined
+                            ? metricNumber.format(position.priceToFreeCashFlow)
+                            : "N/A"}
+                        </small>
                         <small>{position.marketPriceAt
                           ? formatMarketPriceTimestamp(position.marketPriceAt)
                           : position.modelPrice !== undefined

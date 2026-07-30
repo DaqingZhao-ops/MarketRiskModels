@@ -28,6 +28,8 @@ export type Position = {
   marketPriceModel?: RateModelName;
   marketPriceRate?: number;
   marketPriceRateTenor?: number;
+  priceToFreeCashFlow?: number;
+  fundamentalsAt?: string;
   riskSource?: "provided" | "historical-pending" | "historical" | "fallback";
 };
 
@@ -43,6 +45,14 @@ export type HistoricalSeries = {
   optionQuote?: {
     price: number;
     observedAt: string;
+    source: string;
+  };
+  fundamentals?: {
+    marketCap: number;
+    freeCashFlow: number;
+    priceToFreeCashFlow?: number;
+    periodEnd?: string;
+    fetchedAt: string;
     source: string;
   };
   retrievedAt?: string;
@@ -261,6 +271,12 @@ export function enrichPositionsWithHistoricalRisk(
         : undefined,
       marketPriceRate: hasModeledOptionPrice ? modeledOptionPrice.riskFreeRate : undefined,
       marketPriceRateTenor: hasModeledOptionPrice ? modeledOptionPrice.years : undefined,
+      priceToFreeCashFlow: position.type === "Stock"
+        ? series.fundamentals?.priceToFreeCashFlow
+        : undefined,
+      fundamentalsAt: position.type === "Stock"
+        ? series.fundamentals?.periodEnd ?? series.fundamentals?.fetchedAt
+        : undefined,
       marketValue: Math.abs(position.quantity * latestPrice * position.multiplier),
       volatility: refreshRisk && Number.isFinite(volatility) && volatility > 0
         ? volatility
