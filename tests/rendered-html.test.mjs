@@ -85,6 +85,17 @@ test("links populated 30-day asset trends to Yahoo Finance charts", async () => 
   assert.match(source, /Open Yahoo Finance chart for/);
 });
 
+test("rounds displayed calculated market metrics to three decimal places", async () => {
+  const source = await readFile(
+    new URL("../app/risk-workbench.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(source, /const money[\s\S]*?maximumFractionDigits: 3/);
+  assert.match(source, /const percent[\s\S]*?maximumFractionDigits: 3/);
+  assert.match(source, /function roundMetric[\s\S]*?1_000/);
+  assert.match(source, /marketPrice[\s\S]*?maximumFractionDigits: 3/);
+});
+
 test("includes all supported instrument classes", async () => {
   const response = await render();
   const html = await response.text();
