@@ -75,6 +75,40 @@ async def fetch_yfinance_option_quote(symbol: str) -> dict[str, Any] | None:
     return await asyncio.to_thread(_fetch_yfinance_option_quote_sync, symbol)
 
 
+def _fetch_yfinance_fundamentals_sync(symbol: str) -> dict[str, Any] | None:
+    import yfinance as yf
+
+    ticker = yf.Ticker(symbol.strip().upper())
+    cash_flow = ticker.ttm_cashflow
+    if cash_flow.empty or "Free Cash Flow" not in cash_flow.index:
+        return None
+    free_cash_flow = float(cash_flow.loc["Free Cash Flow"].iloc[0])
+    market_cap = ticker.info.get("marketCap")
+    if not isinstance(market_cap, (int, float)):
+        return None
+    period_end = cash_flow.columns[0]
+    return {
+        "marketCap": float(market_cap),
+        "freeCashFlow": free_cash_flow,
+        "priceToFreeCashFlow": (
+            float(market_cap) / free_cash_flow
+            if free_cash_flow > 0
+            else None
+        ),
+        "periodEnd": (
+            period_end.date().isoformat()
+            if hasattr(period_end, "date")
+            else str(period_end)
+        ),
+        "fetchedAt": datetime.now(timezone.utc).isoformat(),
+        "source": "yfinance trailing fundamentals",
+    }
+
+
+async def fetch_yfinance_fundamentals(symbol: str) -> dict[str, Any] | None:
+    return await asyncio.to_thread(_fetch_yfinance_fundamentals_sync, symbol)
+
+
 async def fetch_polygon_series(
     symbol: str,
     api_key: str,

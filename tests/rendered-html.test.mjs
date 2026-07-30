@@ -95,6 +95,7 @@ test("rounds displayed calculated market metrics to three decimal places", async
   assert.match(source, /const percent[\s\S]*?maximumFractionDigits: 3/);
   assert.match(source, /function roundMetric[\s\S]*?1_000/);
   assert.match(source, /const marketMoney[\s\S]*?maximumFractionDigits: 3/);
+  assert.match(source, /P\/FCF[\s\S]*?N\/A/);
 });
 
 test("includes all supported instrument classes", async () => {

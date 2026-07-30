@@ -169,7 +169,21 @@ test("calculates missing broker risk factors from historical prices", () => {
     fetchedAt: "2026-03-02T00:00:00Z",
     mappings: { AAPL: "AAPL", SPY: "SPY" },
     series: [
-      { symbol: "AAPL", sourceSymbol: "AAPL", dates, adjustedClose: prices(marketReturns.map((value) => value * 2), 100), latestPrice: 250 },
+      {
+        symbol: "AAPL",
+        sourceSymbol: "AAPL",
+        dates,
+        adjustedClose: prices(marketReturns.map((value) => value * 2), 100),
+        latestPrice: 250,
+        fundamentals: {
+          marketCap: 4_000_000_000_000,
+          freeCashFlow: 100_000_000_000,
+          priceToFreeCashFlow: 40,
+          periodEnd: "2026-03-31",
+          fetchedAt: "2026-07-30T20:00:00Z",
+          source: "Yahoo Finance trailing fundamentals",
+        },
+      },
       { symbol: "SPY", sourceSymbol: "SPY", dates, adjustedClose: prices(marketReturns, 500) },
     ],
   };
@@ -180,6 +194,8 @@ test("calculates missing broker risk factors from historical prices", () => {
   assert.equal(enriched.price, 250);
   assert.equal(enriched.marketPrice, 250);
   assert.equal(enriched.marketValue, 25000);
+  assert.equal(enriched.priceToFreeCashFlow, 40);
+  assert.equal(enriched.fundamentalsAt, "2026-03-31");
 });
 
 test("refreshes a provided stock price without replacing provided risk factors", () => {

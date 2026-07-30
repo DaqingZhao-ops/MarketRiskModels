@@ -81,6 +81,14 @@ type MarketSeries = {
     observedAt: string;
     source: string;
   };
+  fundamentals?: {
+    marketCap: number;
+    freeCashFlow: number;
+    priceToFreeCashFlow?: number;
+    periodEnd?: string;
+    fetchedAt: string;
+    source: string;
+  };
 };
 
 function isOccOption(symbol: string) {
@@ -114,6 +122,47 @@ async function fetchYahooOptionQuote(symbol: string, forceRefresh = false) {
       ? new Date(timestamp * 1000).toISOString()
       : new Date().toISOString(),
     source: "Yahoo Finance option trade",
+  };
+}
+
+async function fetchYahooFundamentals(symbol: string, forceRefresh = false) {
+  const ticker = symbol.trim().toUpperCase();
+  const now = Math.floor(Date.now() / 1000);
+  const url = new URL(
+    `https://query2.finance.yahoo.com/ws/fundamentals-timeseries/v1/finance/timeseries/${encodeURIComponent(ticker)}`,
+  );
+  url.searchParams.set("symbol", ticker);
+  url.searchParams.set("type", "trailingMarketCap,trailingFreeCashFlow");
+  url.searchParams.set("period1", String(now - 3 * 366 * 86400));
+  url.searchParams.set("period2", String(now + 86400));
+  const response = await fetch(url, {
+    headers: { "User-Agent": "Mozilla/5.0 MarketRiskModels/1.0" },
+    ...(forceRefresh ? { cache: "no-store" as const } : { next: { revalidate: 21600 } }),
+  });
+  if (!response.ok) throw new Error(`${ticker}: fundamentals request failed (${response.status})`);
+  const payload = await response.json() as {
+    timeseries?: {
+      result?: Array<{
+        trailingMarketCap?: Array<{ asOfDate?: string; reportedValue?: { raw?: number } }>;
+        trailingFreeCashFlow?: Array<{ asOfDate?: string; reportedValue?: { raw?: number } }>;
+      }>;
+    };
+  };
+  const results = payload.timeseries?.result ?? [];
+  const marketCapItem = results.flatMap((item) => item.trailingMarketCap ?? []).at(-1);
+  const freeCashFlowItem = results.flatMap((item) => item.trailingFreeCashFlow ?? []).at(-1);
+  const marketCap = marketCapItem?.reportedValue?.raw;
+  const freeCashFlow = freeCashFlowItem?.reportedValue?.raw;
+  if (typeof marketCap !== "number" || typeof freeCashFlow !== "number") {
+    throw new Error(`${ticker}: market cap or trailing free cash flow unavailable`);
+  }
+  return {
+    marketCap,
+    freeCashFlow,
+    priceToFreeCashFlow: freeCashFlow > 0 ? marketCap / freeCashFlow : undefined,
+    periodEnd: freeCashFlowItem?.asOfDate,
+    fetchedAt: new Date().toISOString(),
+    source: "Yahoo Finance trailing fundamentals",
   };
 }
 
@@ -272,6 +321,12 @@ export async function GET(request: NextRequest) {
     .map((symbol) => symbol.trim().toUpperCase())
     .filter(Boolean);
   const symbols = [...new Set(requested)].slice(0, 30);
+  const fundamentalSymbols = new Set(
+    (request.nextUrl.searchParams.get("fundamentals") ?? "")
+      .split(",")
+      .map((symbol) => symbol.trim().toUpperCase())
+      .filter(Boolean),
+  );
   if (!symbols.length) {
     return NextResponse.json({ error: "At least one symbol is required." }, { status: 400 });
   }
@@ -285,7 +340,19 @@ export async function GET(request: NextRequest) {
         ? fetchTreasuryCurve(forceRefresh).catch(() => undefined)
         : Promise.resolve(undefined),
     ]);
-    const series = results.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
+    const series = await Promise.all(results.flatMap((result) =>
+      result.status === "fulfilled" ? [Promise.resolve(result.value)] : [])
+      .map(async (item) => {
+        if (!fundamentalSymbols.has(item.symbol)) return item;
+        try {
+          return {
+            ...item,
+            fundamentals: await fetchYahooFundamentals(item.symbol, forceRefresh),
+          };
+        } catch {
+          return item;
+        }
+      }));
     if (!series.length) throw new Error("No price history was returned for the imported positions.");
     const providers = [...new Set(series.map((item) => item.source))];
     return NextResponse.json({
