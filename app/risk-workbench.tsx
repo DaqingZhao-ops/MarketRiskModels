@@ -208,7 +208,7 @@ function formatMarketPriceTimestamp(value: string) {
       day: "numeric",
       year: Number(year) === new Date().getFullYear() ? undefined : "numeric",
       timeZone: "UTC",
-    })} close`;
+    })} latest available`;
   }
   return new Date(value).toLocaleString([], {
     month: "short",
