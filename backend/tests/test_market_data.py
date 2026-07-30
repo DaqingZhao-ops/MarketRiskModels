@@ -12,6 +12,8 @@ from market_risk.market_data import load_series, source_symbol
 
 def test_source_symbol_maps_options_and_treasury_proxy() -> None:
     assert source_symbol("AAPL C200") == "AAPL"
+    assert source_symbol("AAPL260918C00335000") == "AAPL"
+    assert source_symbol("SPY260918P00740000") == "SPY"
     assert source_symbol("UST2Y") == "SHY"
     assert source_symbol("UST10Y") == "IEF"
     assert source_symbol("UST20Y") == "TLT"

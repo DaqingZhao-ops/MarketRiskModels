@@ -37,6 +37,12 @@ const metricNumber = new Intl.NumberFormat("en-US", {
   maximumFractionDigits: 3,
 });
 
+const marketMoney = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+  maximumFractionDigits: 3,
+});
+
 function roundMetric(value: number) {
   return Math.round((value + Number.EPSILON) * 1_000) / 1_000;
 }
@@ -673,6 +679,8 @@ export function RiskWorkbench() {
             marketPrice: undefined,
             marketPriceAt: undefined,
             marketPriceSource: undefined,
+            modelPrice: undefined,
+            modelPriceSource: undefined,
             marketPriceModel: undefined,
             marketPriceRate: undefined,
             marketPriceRateTenor: undefined,
@@ -1113,6 +1121,8 @@ export function RiskWorkbench() {
           updated.marketPrice = undefined;
           updated.marketPriceAt = undefined;
           updated.marketPriceSource = undefined;
+          updated.modelPrice = undefined;
+          updated.modelPriceSource = undefined;
           updated.marketPriceModel = undefined;
           updated.marketPriceRate = undefined;
           updated.marketPriceRateTenor = undefined;
@@ -2087,25 +2097,38 @@ export function RiskWorkbench() {
                   <td><input aria-label={`${position.symbol} quantity`} type="number" value={position.quantity} onChange={(e) => updatePosition(position.id, "quantity", e.target.value)} /></td>
                   <td><input aria-label={`${position.symbol} unit price`} type="number" min="0" step="0.01" value={position.price} onChange={(e) => updatePosition(position.id, "price", e.target.value)} /></td>
                   <td>
-                    {position.marketPrice !== undefined ? (
+                    {position.marketPrice !== undefined || position.modelPrice !== undefined ? (
                       <span className="market-quote">
-                        <strong>{new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 3 }).format(position.marketPrice)}</strong>
+                        <strong>
+                          {position.marketPrice !== undefined ? "Market " : "Model "}
+                          {marketMoney.format(position.marketPrice ?? position.modelPrice ?? 0)}
+                        </strong>
                         <em>{
-                          position.marketPriceSource === "black-scholes"
+                          position.marketPriceSource === "market" && position.type.endsWith("Option")
+                            ? "Yahoo Finance option trade"
+                            : position.modelPriceSource === "black-scholes"
                             ? `Black–Scholes · ${position.marketPriceModel ?? "rate model"} · ${
                                 position.marketPriceRate !== undefined
                                   ? `${(position.marketPriceRate * 100).toFixed(3)}% zero / ${Math.round((position.marketPriceRateTenor ?? 0) * 365.25)}d`
                                   : "rate unavailable"
                               }`
-                            : position.marketPriceSource === "hull-white"
+                            : position.modelPriceSource === "hull-white"
                               ? `Priced with ${position.marketPriceModel ?? rateCalibration?.model ?? "rate model"}`
-                            : position.marketPriceSource === "treasury-curve"
+                            : position.modelPriceSource === "treasury-curve"
                               ? `Priced with ${position.marketPriceModel ?? rateCalibration?.model ?? "rate model"} curve`
                               : "Market quote"
                         }</em>
+                        {position.marketPrice !== undefined && position.modelPrice !== undefined ? (
+                          <small className="option-model-comparison">
+                            Model {marketMoney.format(position.modelPrice)} · difference{" "}
+                            {marketMoney.format(position.marketPrice - position.modelPrice)}
+                          </small>
+                        ) : null}
                         <small>{position.marketPriceAt
                           ? formatMarketPriceTimestamp(position.marketPriceAt)
-                          : "Latest available"}</small>
+                          : position.modelPrice !== undefined
+                            ? "Calculated value"
+                            : "Latest available"}</small>
                       </span>
                     ) : (
                       <span className="market-quote market-quote-empty">Unavailable</span>

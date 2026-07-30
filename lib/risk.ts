@@ -22,7 +22,9 @@ export type Position = {
   delta: number;
   marketPrice?: number;
   marketPriceAt?: string;
-  marketPriceSource?: "market" | "black-scholes" | "treasury-curve" | "hull-white";
+  marketPriceSource?: "market";
+  modelPrice?: number;
+  modelPriceSource?: "black-scholes" | "treasury-curve" | "hull-white";
   marketPriceModel?: RateModelName;
   marketPriceRate?: number;
   marketPriceRateTenor?: number;
@@ -38,6 +40,11 @@ export type HistoricalSeries = {
   adjustedClose: number[];
   latestPrice?: number;
   latestPriceAt?: string;
+  optionQuote?: {
+    price: number;
+    observedAt: string;
+    source: string;
+  };
   retrievedAt?: string;
   currency?: string;
 };
@@ -207,32 +214,45 @@ export function enrichPositionsWithHistoricalRisk(
       : undefined;
     const hasTreasuryModelPrice = typeof treasuryModelPrice === "number" &&
       Number.isFinite(treasuryModelPrice) && treasuryModelPrice > 0;
-    const latestPrice = canRefreshPrice
-      ? series.latestPrice as number
-      : hasModeledOptionPrice
-        ? modeledOptionPrice.price
-        : hullWhiteOption
-          ? hullWhiteOption.price
+    const optionMarketPrice = position.type.endsWith("Option") &&
+      typeof series.optionQuote?.price === "number" &&
+      Number.isFinite(series.optionQuote.price) &&
+      series.optionQuote.price >= 0
+      ? series.optionQuote.price
+      : undefined;
+    const modelPrice = hasModeledOptionPrice
+      ? modeledOptionPrice.price
+      : hullWhiteOption
+        ? hullWhiteOption.price
         : hasTreasuryModelPrice
           ? treasuryModelPrice
+          : undefined;
+    const latestPrice = optionMarketPrice !== undefined
+      ? optionMarketPrice
+      : canRefreshPrice
+      ? series.latestPrice as number
+      : modelPrice !== undefined
+          ? modelPrice
           : position.price;
     return {
       ...position,
       price: latestPrice,
-      marketPrice: canRefreshPrice || hasModeledOptionPrice || hullWhiteOption || hasTreasuryModelPrice
+      marketPrice: canRefreshPrice || optionMarketPrice !== undefined
         ? latestPrice
         : undefined,
-      marketPriceAt: hasTreasuryModelPrice
-        ? history.treasuryCurve?.asOf
-        : canRefreshPrice || hasModeledOptionPrice || hullWhiteOption
+      marketPriceAt: optionMarketPrice !== undefined
+        ? series.optionQuote?.observedAt
+        : canRefreshPrice
           ? series.latestPriceAt
           : undefined,
-      marketPriceSource: canRefreshPrice
+      marketPriceSource: canRefreshPrice || optionMarketPrice !== undefined
         ? "market"
-        : hasModeledOptionPrice
-          ? "black-scholes"
-          : hullWhiteOption
-            ? "hull-white"
+        : undefined,
+      modelPrice,
+      modelPriceSource: hasModeledOptionPrice
+        ? "black-scholes"
+        : hullWhiteOption
+          ? "hull-white"
           : hasTreasuryModelPrice
             ? "treasury-curve"
             : undefined,
