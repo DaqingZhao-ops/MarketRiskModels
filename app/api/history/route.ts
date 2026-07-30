@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { currentMarketCap } from "../../../lib/fundamentals";
+
 const PROXIES: Record<string, string> = {
   UST2Y: "SHY",
   UST5Y: "IEI",
@@ -125,14 +127,21 @@ async function fetchYahooOptionQuote(symbol: string, forceRefresh = false) {
   };
 }
 
-async function fetchYahooFundamentals(symbol: string, forceRefresh = false) {
+async function fetchYahooFundamentals(
+  symbol: string,
+  currentPrice?: number,
+  forceRefresh = false,
+) {
   const ticker = symbol.trim().toUpperCase();
   const now = Math.floor(Date.now() / 1000);
   const url = new URL(
     `https://query2.finance.yahoo.com/ws/fundamentals-timeseries/v1/finance/timeseries/${encodeURIComponent(ticker)}`,
   );
   url.searchParams.set("symbol", ticker);
-  url.searchParams.set("type", "trailingMarketCap,trailingFreeCashFlow");
+  url.searchParams.set(
+    "type",
+    "trailingMarketCap,trailingFreeCashFlow,quarterlyOrdinarySharesNumber",
+  );
   url.searchParams.set("period1", String(now - 3 * 366 * 86400));
   url.searchParams.set("period2", String(now + 86400));
   const response = await fetch(url, {
@@ -145,17 +154,29 @@ async function fetchYahooFundamentals(symbol: string, forceRefresh = false) {
       result?: Array<{
         trailingMarketCap?: Array<{ asOfDate?: string; reportedValue?: { raw?: number } }>;
         trailingFreeCashFlow?: Array<{ asOfDate?: string; reportedValue?: { raw?: number } }>;
+        quarterlyOrdinarySharesNumber?: Array<{
+          asOfDate?: string;
+          reportedValue?: { raw?: number };
+        }>;
       }>;
     };
   };
   const results = payload.timeseries?.result ?? [];
   const marketCapItem = results.flatMap((item) => item.trailingMarketCap ?? []).at(-1);
   const freeCashFlowItem = results.flatMap((item) => item.trailingFreeCashFlow ?? []).at(-1);
-  const marketCap = marketCapItem?.reportedValue?.raw;
+  const sharesItem = results
+    .flatMap((item) => item.quarterlyOrdinarySharesNumber ?? [])
+    .at(-1);
+  const reportedMarketCap = marketCapItem?.reportedValue?.raw;
   const freeCashFlow = freeCashFlowItem?.reportedValue?.raw;
-  if (typeof marketCap !== "number" || typeof freeCashFlow !== "number") {
+  if (typeof reportedMarketCap !== "number" || typeof freeCashFlow !== "number") {
     throw new Error(`${ticker}: market cap or trailing free cash flow unavailable`);
   }
+  const marketCap = currentMarketCap(
+    currentPrice,
+    sharesItem?.reportedValue?.raw,
+    reportedMarketCap,
+  );
   return {
     marketCap,
     freeCashFlow,
@@ -318,7 +339,11 @@ async function fetchSeries(
   if (includeFundamentals) {
     enrichedSeries = {
       ...enrichedSeries,
-      fundamentals: await fetchYahooFundamentals(symbol, forceRefresh),
+      fundamentals: await fetchYahooFundamentals(
+        symbol,
+        enrichedSeries.latestPrice,
+        forceRefresh,
+      ),
     };
   }
   return enrichedSeries;
