@@ -2,6 +2,7 @@ import {
   hullWhiteBondOption,
   hullWhiteDiscountFactor,
   type HullWhiteCalibration,
+  type RateModelName,
 } from "./hull-white.ts";
 
 export type ModelKind = "historical" | "monteCarlo" | "parametric";
@@ -22,6 +23,9 @@ export type Position = {
   marketPrice?: number;
   marketPriceAt?: string;
   marketPriceSource?: "market" | "black-scholes" | "treasury-curve" | "hull-white";
+  marketPriceModel?: RateModelName;
+  marketPriceRate?: number;
+  marketPriceRateTenor?: number;
   riskSource?: "provided" | "historical-pending" | "historical" | "fallback";
 };
 
@@ -34,6 +38,7 @@ export type HistoricalSeries = {
   adjustedClose: number[];
   latestPrice?: number;
   latestPriceAt?: string;
+  retrievedAt?: string;
   currency?: string;
 };
 
@@ -61,6 +66,9 @@ export type RiskResult = {
   contributions: Contribution[];
   historyStart?: string;
   historyEnd?: string;
+  varFloor?: number;
+  varFloorApplied?: boolean;
+  portfolioKey?: string;
   engine?: string;
   runId?: number;
 };
@@ -137,13 +145,15 @@ export function enrichPositionsWithHistoricalRisk(
   history: HistoricalData,
   asOf = new Date(),
   rateCalibration?: HullWhiteCalibration,
+  refreshAllRisk = false,
 ) {
   const benchmark = history.series.find((item) => item.symbol === "SPY");
   return positions.map((position) => {
-    if (!["historical-pending", "fallback"].includes(position.riskSource ?? "")) return position;
+    const refreshRisk = refreshAllRisk ||
+      ["historical-pending", "fallback"].includes(position.riskSource ?? "");
     const series = history.series.find((item) => item.symbol === position.symbol);
     if (!series || series.adjustedClose.length < 30) {
-      return { ...position, riskSource: "fallback" as const };
+      return refreshRisk ? { ...position, riskSource: "fallback" as const } : position;
     }
     const returns = dailyReturns(series);
     const volatility = historicalDeviation(returns.map((item) => item.value)) * Math.sqrt(252);
@@ -153,16 +163,16 @@ export function enrichPositionsWithHistoricalRisk(
       ? modelHullWhiteBondOption(position.symbol, rateCalibration)
       : undefined;
     const optionDelta = position.type.endsWith("Option")
-      ? blackScholesDelta(position.symbol, underlyingPrice, volatility, asOf)
+      ? blackScholesDelta(position.symbol, underlyingPrice, volatility, asOf, rateCalibration)
       : 1;
     const canRefreshPrice = ["Stock", "ETF", "Mutual Fund"].includes(position.type) &&
       typeof series.latestPrice === "number" && Number.isFinite(series.latestPrice) &&
       series.latestPrice > 0;
     const modeledOptionPrice = ["Stock Option", "ETF Option"].includes(position.type)
-      ? blackScholesPrice(position.symbol, underlyingPrice, volatility, asOf)
+      ? blackScholesPrice(position.symbol, underlyingPrice, volatility, asOf, rateCalibration)
       : undefined;
-    const hasModeledOptionPrice = typeof modeledOptionPrice === "number" &&
-      Number.isFinite(modeledOptionPrice) && modeledOptionPrice >= 0;
+    const hasModeledOptionPrice = modeledOptionPrice !== undefined &&
+      Number.isFinite(modeledOptionPrice.price) && modeledOptionPrice.price >= 0;
     const treasuryModelPrice = position.type === "Bond"
       ? modelTreasuryPrice(
           position.symbol,
@@ -175,7 +185,7 @@ export function enrichPositionsWithHistoricalRisk(
     const latestPrice = canRefreshPrice
       ? series.latestPrice as number
       : hasModeledOptionPrice
-        ? modeledOptionPrice
+        ? modeledOptionPrice.price
         : hullWhiteOption
           ? hullWhiteOption.price
         : hasTreasuryModelPrice
@@ -201,11 +211,18 @@ export function enrichPositionsWithHistoricalRisk(
           : hasTreasuryModelPrice
             ? "treasury-curve"
             : undefined,
+      marketPriceModel: hullWhiteOption || hasTreasuryModelPrice || hasModeledOptionPrice
+        ? rateCalibration?.model
+        : undefined,
+      marketPriceRate: hasModeledOptionPrice ? modeledOptionPrice.riskFreeRate : undefined,
+      marketPriceRateTenor: hasModeledOptionPrice ? modeledOptionPrice.years : undefined,
       marketValue: Math.abs(position.quantity * latestPrice * position.multiplier),
-      volatility: Number.isFinite(volatility) && volatility > 0 ? volatility : position.volatility,
-      beta: Number.isFinite(beta) ? beta : position.beta,
+      volatility: refreshRisk && Number.isFinite(volatility) && volatility > 0
+        ? volatility
+        : position.volatility,
+      beta: refreshRisk && Number.isFinite(beta) ? beta : position.beta,
       delta: hullWhiteOption?.delta ?? optionDelta ?? position.delta,
-      riskSource: "historical" as const,
+      riskSource: refreshRisk ? "historical" as const : position.riskSource,
     };
   });
 }
@@ -270,6 +287,55 @@ function historicalBeta(asset: HistoricalSeries, benchmark: HistoricalSeries) {
   return variance > 0 ? covariance / variance : Number.NaN;
 }
 
+export function calculatePortfolioAlphaBeta(
+  positions: Position[],
+  history?: HistoricalData,
+) {
+  if (!history) return undefined;
+  const benchmark = history.series.find((item) => item.symbol === "SPY");
+  if (!benchmark) return undefined;
+  const grossMarketValue = positions.reduce(
+    (sum, position) => sum + Math.abs(position.marketValue),
+    0,
+  );
+  if (grossMarketValue <= 0) return undefined;
+  const assets = positions.flatMap((position) => {
+    const series = history.series.find((item) => item.symbol === position.symbol);
+    if (!series) return [];
+    return [{
+      weight: directionalExposure(position) / grossMarketValue,
+      returns: new Map(dailyReturns(series).map((item) => [item.date, item.value])),
+    }];
+  });
+  if (!assets.length) return undefined;
+  const pairs = dailyReturns(benchmark).flatMap((marketObservation) => {
+    if (!assets.every((asset) => asset.returns.has(marketObservation.date))) return [];
+    const portfolioReturn = assets.reduce(
+      (sum, asset) => sum + asset.weight * (asset.returns.get(marketObservation.date) ?? 0),
+      0,
+    );
+    return [[portfolioReturn, marketObservation.value] as const];
+  });
+  if (pairs.length < 30) return undefined;
+  const portfolioMean = pairs.reduce((sum, pair) => sum + pair[0], 0) / pairs.length;
+  const marketMean = pairs.reduce((sum, pair) => sum + pair[1], 0) / pairs.length;
+  const covariance = pairs.reduce(
+    (sum, pair) => sum + (pair[0] - portfolioMean) * (pair[1] - marketMean),
+    0,
+  ) / (pairs.length - 1);
+  const marketVariance = pairs.reduce(
+    (sum, pair) => sum + (pair[1] - marketMean) ** 2,
+    0,
+  ) / (pairs.length - 1);
+  if (marketVariance <= 0) return undefined;
+  const beta = covariance / marketVariance;
+  return {
+    alpha: (portfolioMean - beta * marketMean) * 252,
+    beta,
+    observations: pairs.length,
+  };
+}
+
 function optionTerms(symbol: string, asOf: Date) {
   const compact = symbol.replace(/^[+-]/, "").replace(/\s/g, "");
   const occ = compact.match(/^[A-Z]{1,6}(\d{6})([CP])(\d{8})$/i);
@@ -289,32 +355,56 @@ function optionTerms(symbol: string, asOf: Date) {
   return { callPut: simple[1].toUpperCase(), strike: Number(simple[2]), years: 90 / 365.25 };
 }
 
-function blackScholesInputs(symbol: string, spot: number, volatility: number, asOf: Date) {
+function blackScholesInputs(
+  symbol: string,
+  spot: number,
+  volatility: number,
+  asOf: Date,
+  rateCalibration?: HullWhiteCalibration,
+) {
   const terms = optionTerms(symbol, asOf);
-  if (!terms || spot <= 0 || volatility <= 0 || terms.strike <= 0) return undefined;
+  if (!terms || !rateCalibration || spot <= 0 || volatility <= 0 || terms.strike <= 0) {
+    return undefined;
+  }
   const { callPut, strike, years } = terms;
-  const d1 = (Math.log(spot / strike) + (0.043 + volatility ** 2 / 2) * years) /
+  const discountFactor = hullWhiteDiscountFactor(rateCalibration, years);
+  if (!discountFactor || discountFactor <= 0) return undefined;
+  const riskFreeRate = -Math.log(discountFactor) / years;
+  const d1 = (Math.log(spot / strike) + (riskFreeRate + volatility ** 2 / 2) * years) /
     (volatility * Math.sqrt(years));
   const d2 = d1 - volatility * Math.sqrt(years);
-  return { callPut, strike, years, d1, d2 };
+  return { callPut, strike, years, riskFreeRate, d1, d2 };
 }
 
-function blackScholesDelta(symbol: string, spot: number, volatility: number, asOf: Date) {
-  const inputs = blackScholesInputs(symbol, spot, volatility, asOf);
+function blackScholesDelta(
+  symbol: string,
+  spot: number,
+  volatility: number,
+  asOf: Date,
+  rateCalibration?: HullWhiteCalibration,
+) {
+  const inputs = blackScholesInputs(symbol, spot, volatility, asOf, rateCalibration);
   if (!inputs) return undefined;
   const { callPut, d1 } = inputs;
   const callDelta = normalCdf(d1);
   return callPut === "P" ? callDelta - 1 : callDelta;
 }
 
-function blackScholesPrice(symbol: string, spot: number, volatility: number, asOf: Date) {
-  const inputs = blackScholesInputs(symbol, spot, volatility, asOf);
+function blackScholesPrice(
+  symbol: string,
+  spot: number,
+  volatility: number,
+  asOf: Date,
+  rateCalibration?: HullWhiteCalibration,
+) {
+  const inputs = blackScholesInputs(symbol, spot, volatility, asOf, rateCalibration);
   if (!inputs) return undefined;
-  const { callPut, strike, years, d1, d2 } = inputs;
-  const discountedStrike = strike * Math.exp(-0.043 * years);
-  return callPut === "C"
+  const { callPut, strike, years, riskFreeRate, d1, d2 } = inputs;
+  const discountedStrike = strike * Math.exp(-riskFreeRate * years);
+  const price = callPut === "C"
     ? spot * normalCdf(d1) - discountedStrike * normalCdf(d2)
     : discountedStrike * normalCdf(-d2) - spot * normalCdf(-d1);
+  return { price, riskFreeRate, years };
 }
 
 function normalCdf(value: number) {
@@ -584,15 +674,54 @@ function portfolioDailyVolatility(positions: Position[]) {
   return Math.sqrt(Math.max(variance, 0));
 }
 
+function componentRiskShares(positions: Position[]) {
+  const exposures = positions.map(
+    (position) => directionalExposure(position) * position.volatility / Math.sqrt(252),
+  );
+  const varianceContributions = exposures.map((exposure, index) =>
+    exposure * exposures.reduce(
+      (sum, otherExposure, otherIndex) =>
+        sum + correlation(positions[index], positions[otherIndex]) * otherExposure,
+      0,
+    ));
+  const variance = varianceContributions.reduce((sum, value) => sum + value, 0);
+  if (variance <= 0) return positions.map(() => 0);
+  return varianceContributions.map((value) => value / variance);
+}
+
+function correlationCholesky(positions: Position[]) {
+  const size = positions.length;
+  const lower = Array.from({ length: size }, () =>
+    Array.from({ length: size }, () => 0));
+  for (let row = 0; row < size; row += 1) {
+    for (let column = 0; column <= row; column += 1) {
+      let value = correlation(positions[row], positions[column]);
+      for (let index = 0; index < column; index += 1) {
+        value -= lower[row][index] * lower[column][index];
+      }
+      if (row === column) {
+        lower[row][column] = Math.sqrt(Math.max(value, 1e-10));
+      } else {
+        lower[row][column] = value / lower[column][column];
+      }
+    }
+  }
+  return lower;
+}
+
 function scenarioLosses(positions: Position[], count: number, heavyTails: boolean) {
   const random = mulberry32(20260718 + positions.length * 101);
+  const cholesky = correlationCholesky(positions);
   const losses: number[] = [];
   for (let scenario = 0; scenario < count; scenario += 1) {
-    const marketShock = normal(random);
+    const independent = positions.map(() => normal(random));
     let pnl = 0;
-    for (const position of positions) {
-      const idiosyncraticShock = normal(random);
-      let shock = position.beta * marketShock * 0.62 + idiosyncraticShock * Math.sqrt(Math.max(0.08, 1 - Math.min(0.92, position.beta ** 2 * 0.38)));
+    for (let positionIndex = 0; positionIndex < positions.length; positionIndex += 1) {
+      const position = positions[positionIndex];
+      let shock = cholesky[positionIndex].reduce(
+        (sum, coefficient, index) => sum + coefficient * independent[index],
+        0,
+      );
       if (heavyTails && scenario % 47 === 0) shock *= 1.8;
       const dailyMove = shock * position.volatility / Math.sqrt(252);
       pnl += directionalExposure(position) * dailyMove;
@@ -680,6 +809,8 @@ export function calculateRisk(
   let expectedShortfall: number;
   let observations: number;
   let historyDates: string[] = [];
+  let varFloor: number | undefined;
+  let varFloorApplied = false;
 
   if (model === "historical") {
     const historical = history
@@ -694,6 +825,17 @@ export function calculateRisk(
     valueAtRisk = Math.max(0, quantile(sorted, confidence));
     const tail = sorted.filter((loss) => loss >= valueAtRisk);
     expectedShortfall = tail.reduce((sum, loss) => sum + loss, 0) / Math.max(1, tail.length);
+    const floorVolatility = dailyVolatility || portfolioDailyVolatility(positions);
+    const z = inverseNormal(confidence);
+    varFloor = z * floorVolatility * scale;
+    if (valueAtRisk <= 0 && varFloor > 0) {
+      valueAtRisk = varFloor;
+      expectedShortfall =
+        floorVolatility * scale *
+        (Math.exp(-(z ** 2) / 2) / Math.sqrt(2 * Math.PI)) /
+        (1 - confidence);
+      varFloorApplied = true;
+    }
   } else if (model === "parametric") {
     const z = inverseNormal(confidence);
     valueAtRisk = z * dailyVolatility * scale;
@@ -723,14 +865,14 @@ export function calculateRisk(
         scale,
     0,
   );
-  const rawContributions = positions.map((position) => ({
+  const contributionShares = componentRiskShares(positions);
+  const rawContributions = positions.map((position, index) => ({
     ...position,
-    amount: Math.abs(position.marketValue * position.delta * position.volatility * (0.35 + Math.abs(position.beta))),
+    amount: contributionShares[index] * valueAtRisk,
+    share: contributionShares[index],
   }));
-  const contributionTotal = rawContributions.reduce((sum, item) => sum + item.amount, 0) || 1;
   const contributions = rawContributions
-    .map((item) => ({ ...item, share: item.amount / contributionTotal }))
-    .sort((left, right) => right.share - left.share);
+    .sort((left, right) => right.amount - left.amount);
 
   const maximumLoss = Math.max(...losses.map(Math.abs), valueAtRisk * 1.3, 1);
   const range = Math.ceil(maximumLoss / 5000) * 5000;
@@ -749,6 +891,8 @@ export function calculateRisk(
     contributions,
     historyStart: historyDates[0],
     historyEnd: historyDates.at(-1),
+    varFloor,
+    varFloorApplied,
   };
 }
 

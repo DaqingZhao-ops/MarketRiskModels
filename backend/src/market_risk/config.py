@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./data/market_risk.db"
     allowed_origins: str = "http://localhost:3000"
     market_data_cache_hours: int = 6
+    polygon_api_key: str | None = None
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -32,4 +33,3 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
-

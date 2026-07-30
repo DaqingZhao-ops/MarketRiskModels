@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   calculateEfficientFrontier,
+  calculatePortfolioAlphaBeta,
   calculateRisk,
   enrichPositionsWithHistoricalRisk,
   parsePositionsCsv,
@@ -14,6 +15,19 @@ import {
   hullWhiteDiscountFactor,
   isHullWhiteStale,
 } from "../lib/hull-white.ts";
+
+const optionRateCalibration = fitHullWhiteCurve([
+  { maturity: 0.25, yield: 0.04 },
+  { maturity: 1, yield: 0.041 },
+  { maturity: 5, yield: 0.043 },
+  { maturity: 10, yield: 0.045 },
+], "2026-03-02T00:00:00Z");
+const optionG2Calibration = fitG2Curve([
+  { maturity: 0.25, yield: 0.04 },
+  { maturity: 1, yield: 0.041 },
+  { maturity: 5, yield: 0.043 },
+  { maturity: 10, yield: 0.045 },
+], "2026-03-02T00:00:00Z");
 
 test("imports a Fidelity positions export", () => {
   const csv = `Account Number,Account Name,Symbol,Description,Quantity,Last Price,Current Value,Type
@@ -128,6 +142,44 @@ test("calculates missing broker risk factors from historical prices", () => {
   assert.equal(enriched.marketValue, 25000);
 });
 
+test("refreshes a provided stock price without replacing provided risk factors", () => {
+  const dates = Array.from({ length: 61 }, (_, index) =>
+    new Date(Date.UTC(2026, 0, index + 1)).toISOString().slice(0, 10));
+  const position = {
+    id: "provided-aapl",
+    symbol: "AAPL",
+    type: "Stock",
+    quantity: 10,
+    price: 200,
+    multiplier: 1,
+    marketValue: 2000,
+    volatility: 0.45,
+    beta: 1.4,
+    delta: 1,
+    riskSource: "provided",
+  };
+  const history = {
+    source: "test",
+    fetchedAt: "2026-03-02T00:00:00Z",
+    mappings: { AAPL: "AAPL" },
+    series: [{
+      symbol: "AAPL",
+      sourceSymbol: "AAPL",
+      dates,
+      adjustedClose: dates.map((_, index) => 200 + index),
+      latestPrice: 275,
+      latestPriceAt: "2026-03-02T21:00:00Z",
+    }],
+  };
+  const [enriched] = enrichPositionsWithHistoricalRisk([position], history);
+  assert.equal(enriched.price, 275);
+  assert.equal(enriched.marketPrice, 275);
+  assert.equal(enriched.marketValue, 2750);
+  assert.equal(enriched.volatility, 0.45);
+  assert.equal(enriched.beta, 1.4);
+  assert.equal(enriched.riskSource, "provided");
+});
+
 test("uses a labeled Black-Scholes fallback for simplified stock options", () => {
   const dates = Array.from({ length: 61 }, (_, index) =>
     new Date(Date.UTC(2026, 0, index + 1)).toISOString().slice(0, 10));
@@ -154,11 +206,32 @@ test("uses a labeled Black-Scholes fallback for simplified stock options", () =>
       { symbol: "AAPL C250", sourceSymbol: "AAPL", dates, adjustedClose, latestPrice: 225, latestPriceAt: "2026-03-02T21:00:00Z" },
       { symbol: "SPY", sourceSymbol: "SPY", dates, adjustedClose: adjustedClose.map((price) => price * 2) },
     ],
-  }, new Date("2026-03-02T00:00:00Z"));
+  }, new Date("2026-03-02T00:00:00Z"), optionRateCalibration);
   assert.equal(enriched.marketPriceSource, "black-scholes");
+  assert.equal(enriched.marketPriceModel, "Hull-White 1F");
+  assert.ok(Math.abs(enriched.marketPriceRate - -Math.log(
+    hullWhiteDiscountFactor(optionRateCalibration, 90 / 365.25),
+  ) / (90 / 365.25)) < 1e-12);
+  assert.equal(enriched.marketPriceRateTenor, 90 / 365.25);
   assert.ok(enriched.marketPrice > 0);
   assert.equal(enriched.price, enriched.marketPrice);
   assert.ok(enriched.delta > 0 && enriched.delta < 1);
+  const [repriced] = enrichPositionsWithHistoricalRisk(
+    [enriched],
+    {
+      source: "test",
+      fetchedAt: "2026-03-02T00:00:00Z",
+      mappings: { "AAPL C250": "AAPL", SPY: "SPY" },
+      series: [
+        { symbol: "AAPL C250", sourceSymbol: "AAPL", dates, adjustedClose, latestPrice: 225 },
+        { symbol: "SPY", sourceSymbol: "SPY", dates, adjustedClose },
+      ],
+    },
+    new Date("2026-03-02T00:00:00Z"),
+    optionG2Calibration,
+  );
+  assert.equal(repriced.marketPriceModel, "G2++ 2F");
+  assert.equal(repriced.marketPriceRate, enriched.marketPriceRate);
 });
 
 test("uses the Black-Scholes fallback for SPY ETF options", () => {
@@ -187,7 +260,7 @@ test("uses the Black-Scholes fallback for SPY ETF options", () => {
       { symbol: "SPY P600", sourceSymbol: "SPY", dates, adjustedClose, latestPrice: 625, latestPriceAt: "2026-03-02T21:00:00Z" },
       { symbol: "SPY", sourceSymbol: "SPY", dates, adjustedClose, latestPrice: 625 },
     ],
-  }, new Date("2026-03-02T00:00:00Z"));
+  }, new Date("2026-03-02T00:00:00Z"), optionRateCalibration);
   assert.equal(enriched.marketPriceSource, "black-scholes");
   assert.ok(enriched.marketPrice > 0);
   assert.ok(enriched.delta < 0 && enriched.delta > -1);
@@ -319,6 +392,36 @@ test("negative quantities reverse directional risk exposure", () => {
   assert.ok(hedged.dailyVolatility < unhedged.dailyVolatility);
 });
 
+test("historical risk uses a volatility floor when every observed scenario is a gain", () => {
+  const position = {
+    id: "risky",
+    symbol: "RISK",
+    type: "Stock",
+    quantity: 10,
+    price: 100,
+    multiplier: 1,
+    marketValue: 1000,
+    volatility: 0.3,
+    beta: 1,
+    delta: 1,
+  };
+  const result = calculateRisk([position], "historical", 0.99, 1, {
+    source: "test",
+    fetchedAt: "2026-01-04",
+    mappings: { RISK: "RISK" },
+    series: [{
+      symbol: "RISK",
+      sourceSymbol: "RISK",
+      dates: ["2026-01-01", "2026-01-02", "2026-01-03", "2026-01-04"],
+      adjustedClose: [100, 101, 102, 103],
+    }],
+  });
+  assert.ok(result.var > 0);
+  assert.ok(result.expectedShortfall > result.var);
+  assert.equal(result.varFloorApplied, true);
+  assert.equal(result.var, result.varFloor);
+});
+
 test("same symbol held in multiple accounts aggregates as one market risk factor", () => {
   const shared = {
     symbol: "AAPL",
@@ -341,6 +444,77 @@ test("same symbol held in multiple accounts aggregates as one market risk factor
     "parametric", 0.99, 1,
   );
   assert.ok(Math.abs(split.dailyVolatility - combined.dailyVolatility) < 1e-10);
+});
+
+test("calculates portfolio alpha and beta against synchronized SPY returns", () => {
+  const dates = Array.from({ length: 61 }, (_, index) =>
+    new Date(Date.UTC(2025, 0, index + 1)).toISOString().slice(0, 10));
+  const spy = dates.map((_, index) => 100 * Math.exp(index * 0.001 + Math.sin(index) * 0.004));
+  const asset = [100];
+  for (let index = 1; index < dates.length; index += 1) {
+    const marketReturn = spy[index] / spy[index - 1] - 1;
+    asset.push(asset.at(-1) * (1 + 0.0002 + 1.5 * marketReturn));
+  }
+  const stats = calculatePortfolioAlphaBeta([{
+    id: "asset",
+    symbol: "AAA",
+    type: "Stock",
+    quantity: 10,
+    price: 100,
+    multiplier: 1,
+    marketValue: 1000,
+    volatility: 0.2,
+    beta: 1.5,
+    delta: 1,
+  }], {
+    source: "test",
+    fetchedAt: "2026-01-01",
+    mappings: { AAA: "AAA", SPY: "SPY" },
+    series: [
+      { symbol: "AAA", sourceSymbol: "AAA", dates, adjustedClose: asset },
+      { symbol: "SPY", sourceSymbol: "SPY", dates, adjustedClose: spy },
+    ],
+  });
+  assert.ok(stats);
+  assert.ok(Math.abs(stats.beta - 1.5) < 1e-10);
+  assert.ok(Math.abs(stats.alpha - 0.0002 * 252) < 1e-10);
+  assert.equal(stats.observations, 60);
+});
+
+test("portfolio alpha and beta reverse sign for an explicit short position", () => {
+  const dates = Array.from({ length: 61 }, (_, index) =>
+    new Date(Date.UTC(2025, 0, index + 1)).toISOString().slice(0, 10));
+  const spy = dates.map((_, index) => 100 * Math.exp(index * 0.001 + Math.sin(index) * 0.004));
+  const asset = [100];
+  for (let index = 1; index < dates.length; index += 1) {
+    const marketReturn = spy[index] / spy[index - 1] - 1;
+    asset.push(asset.at(-1) * (1 + 0.0002 + 1.5 * marketReturn));
+  }
+  const stats = calculatePortfolioAlphaBeta([{
+    id: "short-asset",
+    symbol: "AAA",
+    type: "Stock",
+    quantity: -10,
+    price: 100,
+    multiplier: 1,
+    marketValue: 1000,
+    volatility: 0.2,
+    beta: 1.5,
+    delta: 1,
+  }], {
+    source: "test",
+    fetchedAt: "2026-01-01",
+    mappings: { AAA: "AAA", SPY: "SPY" },
+    series: [
+      { symbol: "AAA", sourceSymbol: "AAA", dates, adjustedClose: asset },
+      { symbol: "SPY", sourceSymbol: "SPY", dates, adjustedClose: spy },
+    ],
+  });
+
+  assert.ok(stats);
+  assert.ok(Math.abs(stats.beta + 1.5) < 1e-10);
+  assert.ok(Math.abs(stats.alpha + 0.0002 * 252) < 1e-10);
+  assert.equal(stats.observations, 60);
 });
 
 test("retries fallback risk factors when history later becomes available", () => {
@@ -429,4 +603,56 @@ test("prices bond options with saved G2++ two-factor dynamics", () => {
   assert.ok(option);
   assert.ok(option.price >= 0);
   assert.ok(option.priceVolatility > 0);
+});
+
+test("reprices an existing bond option when the selected rate model changes", () => {
+  const curve = [
+    { maturity: 0.25, yield: 0.04 },
+    { maturity: 1, yield: 0.041 },
+    { maturity: 5, yield: 0.043 },
+    { maturity: 10, yield: 0.045 },
+  ];
+  const hullWhite = fitHullWhiteCurve(curve, "2026-07-17T00:00:00Z");
+  const g2 = fitG2Curve(curve, "2026-07-17T00:00:00Z");
+  const dates = Array.from({ length: 61 }, (_, index) =>
+    new Date(Date.UTC(2025, 0, index + 1)).toISOString().slice(0, 10));
+  const prices = dates.map((_, index) => 100 + index * 0.05);
+  const history = {
+    source: "test",
+    fetchedAt: "2026-01-01",
+    mappings: { "UST10Y C0.65": "IEF", SPY: "SPY" },
+    series: [
+      { symbol: "UST10Y C0.65", sourceSymbol: "IEF", dates, adjustedClose: prices },
+      { symbol: "SPY", sourceSymbol: "SPY", dates, adjustedClose: prices },
+    ],
+  };
+  const position = {
+    id: "bond-option",
+    symbol: "UST10Y C0.65",
+    type: "Bond Option",
+    quantity: 10,
+    price: 1,
+    multiplier: 100,
+    marketValue: 1000,
+    volatility: 0.08,
+    beta: -0.1,
+    delta: 0.3,
+    riskSource: "historical",
+  };
+  const [hullWhitePosition] = enrichPositionsWithHistoricalRisk(
+    [position],
+    history,
+    new Date("2026-01-01"),
+    hullWhite,
+  );
+  const [g2Position] = enrichPositionsWithHistoricalRisk(
+    [hullWhitePosition],
+    history,
+    new Date("2026-01-01"),
+    g2,
+  );
+  assert.equal(hullWhitePosition.marketPriceModel, "Hull-White 1F");
+  assert.equal(g2Position.marketPriceModel, "G2++ 2F");
+  assert.notEqual(g2Position.marketPrice, hullWhitePosition.marketPrice);
+  assert.equal(g2Position.riskSource, "historical");
 });

@@ -36,8 +36,10 @@ See [docs/architecture.md](docs/architecture.md) and
 - One-day and ten-day horizons at 95%, 97.5%, and 99% confidence
 - Selectable, independently persisted Hull–White 1F and G2++ 2F Treasury models
 
-The Python historical engine stores up to four years of Yahoo Finance adjusted
-daily closes in the development database. It aligns observations by trading
+The Python historical engine stores up to four years of `yfinance` adjusted
+daily closes in the development database. If yfinance is unavailable, it falls
+back to Polygon.io adjusted daily aggregates and, when the configured Polygon
+plan permits it, the latest Polygon trade. It aligns observations by trading
 date and uses actual overlapping ten-trading-day returns. Options are
 delta-repriced against parsed underlying symbols, and `UST10Y` maps explicitly
 to the `TLT` Treasury-duration proxy.
@@ -60,6 +62,8 @@ The API runs at `http://localhost:8000`; interactive API documentation is at
 The default development database is `backend/data/market_risk.db`. Override it
 with `MARKET_RISK_DATABASE_URL`. For PostgreSQL, use a SQLAlchemy PostgreSQL
 URL and apply Alembic migrations before starting the service.
+Set `MARKET_RISK_POLYGON_API_KEY` in `backend/.env` to enable Polygon.io as the
+backup provider. API keys must not be committed.
 
 ## Run the web interface
 
@@ -74,6 +78,7 @@ npm run dev
 Open `http://localhost:3000`. Set `PYTHON_RISK_API_URL=http://localhost:8000`
 to use the Python service. If it is absent or unavailable, the interface
 clearly identifies that it is using the TypeScript continuity engine.
+For the continuity market-data route, set `POLYGON_API_KEY` in `.env.local`.
 
 ## Portfolio CSV
 

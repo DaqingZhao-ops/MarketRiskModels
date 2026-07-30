@@ -15,6 +15,7 @@ dependencies = [
   "pydantic-settings>=2.7,<3",
   "sqlalchemy>=2,<3",
   "uvicorn[standard]>=0.34,<1",
+  "yfinance>=0.2.65,<1",
 ]
 
 [project.optional-dependencies]
@@ -29,4 +30,3 @@ packages = ["src/market_risk"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
-

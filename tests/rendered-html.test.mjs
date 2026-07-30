@@ -32,12 +32,26 @@ test("server-renders the market risk workbench", async () => {
   assert.match(html, /<title>Market Risk Models<\/title>/i);
   assert.match(html, /See the loss before/);
   assert.match(html, /Historical simulation/);
+  assert.match(html, /Live market briefing/);
+  assert.match(html, /Yahoo Finance headlines/);
+  assert.match(html, /Refresh market data/);
+  assert.match(html, /Load more headlines/);
+  assert.match(html, /13-week Treasury-bill yield/);
+  assert.match(html, /Loading live market indicators/);
+  assert.match(html, /30-day market trends/);
   assert.match(html, /Expected shortfall/);
+  assert.match(html, /Historical alpha/);
+  assert.match(html, /Portfolio beta/);
   assert.match(html, /Loss distribution legend/);
   assert.match(html, /Tail observations/);
   assert.match(html, /Efficient frontier/);
+  assert.match(html, /Fit quality &amp; data diagnostics/);
+  assert.match(html, /Data-quality warnings/);
+  assert.match(html, /Interest-rate fit/);
+  assert.match(html, /<details class="diagnostics panel" id="diagnostics">/);
   assert.match(html, /Loading enough overlapping history/);
   assert.match(html, /Positions &amp; sensitivities/);
+  assert.match(html, /Refresh prices &amp; risk/);
   assert.match(html, /New position symbol/);
   assert.match(html, />Add<\/button>/);
   assert.match(html, /Position source files/);
@@ -45,13 +59,17 @@ test("server-renders the market risk workbench", async () => {
   assert.match(html, /Replace portfolio/);
   assert.match(html, />Use as default<\/button>/);
   assert.match(html, /Market price/);
+  assert.match(html, /30D range/);
+  assert.doesNotMatch(html, /Sort by Multiplier/);
   assert.match(html, /Unavailable/);
-  assert.match(html, /Black–Scholes fallback/);
+  assert.match(html, /Black–Scholes/);
+  assert.match(html, /Priced with/);
   assert.match(html, /selected stored interest-rate model’s initial discount curve/);
   assert.match(html, /G2\+\+ two factor/);
   assert.match(html, /Risk source/);
   assert.match(html, /Sort by Symbol/);
   assert.match(html, /Drag to move AAPL/);
+  assert.match(html, /News for AAPL/);
   assert.match(html, /Click a column heading to sort/);
   assert.match(html, /Calculating…/);
   assert.match(html, /Important limitation/);
@@ -101,4 +119,13 @@ test("ships the requested default share quantities", async () => {
   assert.match(csv, /^TLT P80,ETF Option,/m);
   assert.match(csv, /^IEF P90,ETF Option,/m);
   assert.match(csv, /^UST10Y,Bond,/m);
+});
+
+test("uses four compact market-index columns on desktop", async () => {
+  const css = await readFile(
+    new URL("../app/globals.css", import.meta.url),
+    "utf8",
+  );
+  assert.match(css, /\.market-indicators\s*\{[^}]*grid-template-columns:\s*repeat\(4,\s*1fr\)/);
+  assert.match(css, /\.market-indicators article strong\s*\{[^}]*font-size:\s*18px/);
 });

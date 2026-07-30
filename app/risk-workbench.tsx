@@ -1,6 +1,6 @@
 "use client";
 
-import { ChangeEvent, DragEvent, KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, DragEvent, KeyboardEvent, MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   DEFAULT_POSITIONS,
   HistoricalData,
@@ -10,6 +10,7 @@ import {
   EfficientFrontierResult,
   calculateRisk,
   calculateEfficientFrontier,
+  calculatePortfolioAlphaBeta,
   enrichPositionsWithHistoricalRisk,
   parsePositionsCsv,
 } from "../lib/risk";
@@ -18,6 +19,7 @@ import {
   type RateModelName,
   isHullWhiteStale,
 } from "../lib/hull-white";
+import { apiUrl } from "../lib/api-client";
 
 const money = new Intl.NumberFormat("en-US", {
   style: "currency",
@@ -50,7 +52,6 @@ const emptyPositionDraft = {
   type: "Stock",
   quantity: "",
   price: "",
-  multiplier: "1",
   volatility: "",
   beta: "",
   delta: "",
@@ -65,6 +66,68 @@ type PortfolioVersion = {
   positions: Position[];
 };
 
+type MarketIndicatorQuote = {
+  label: string;
+  symbol: string;
+  value: number;
+  previousClose: number;
+  change: number;
+  percentChange: number;
+  unit: "index" | "percent" | "fx" | "gold" | "oil";
+  marketState: string;
+  asOf: string;
+  trend: number[];
+  future?: MarketIndicatorQuote;
+};
+
+type MarketBriefing = {
+  source: string;
+  fetchedAt: string;
+  indicators: MarketIndicatorQuote[];
+  headlines: Array<{ title: string; url: string; publishedAt: string }>;
+  warnings: string[];
+  disclosures: string[];
+};
+
+type RiskTrendContribution = {
+  symbol: string;
+  amount: number;
+  share: number;
+  change: number | null;
+  changePercent: number | null;
+};
+
+type RiskTrendPoint = {
+  runId: number;
+  timestamp: string;
+  marketValue: number;
+  var: number;
+  varPercent: number;
+  expectedShortfall: number;
+  dailyVolatility: number;
+  portfolioBeta?: number;
+  contributions: RiskTrendContribution[];
+};
+
+type RiskTrend = {
+  model: ModelKind;
+  confidence: number;
+  horizon: number;
+  portfolioKey: string | null;
+  frequency: "daily" | "all";
+  points: RiskTrendPoint[];
+  excludedInvalidPoints: number;
+};
+
+type BackcastTrend = {
+  mode: "fixedPortfolioBackcast";
+  days: number;
+  lookback: number;
+  asOf: string;
+  points: RiskTrendPoint[];
+  assumptions: string[];
+};
+
 type SortField =
   | "account"
   | "symbol"
@@ -72,7 +135,6 @@ type SortField =
   | "quantity"
   | "price"
   | "marketPrice"
-  | "multiplier"
   | "marketValue"
   | "volatility"
   | "beta"
@@ -83,6 +145,103 @@ type PositionSort = {
   field: SortField;
   direction: "asc" | "desc";
 };
+
+function openNewsArticle(event: MouseEvent<HTMLAnchorElement>, url: string) {
+  if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+    return;
+  }
+
+  if (openPopupWindow(url, "yahoo-finance-article")) {
+    event.preventDefault();
+  }
+}
+
+function openPopupWindow(url: string, name: string) {
+  const width = Math.min(1100, window.screen.availWidth);
+  const height = Math.min(800, window.screen.availHeight);
+  const left = Math.max(0, Math.round((window.screen.availWidth - width) / 2));
+  const top = Math.max(0, Math.round((window.screen.availHeight - height) / 2));
+  const popupWindow = window.open(
+    url,
+    name,
+    `popup=yes,width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes`,
+  );
+
+  if (popupWindow) {
+    popupWindow.opener = null;
+    popupWindow.focus();
+    return true;
+  }
+
+  return false;
+}
+
+function openAssetNews(event: MouseEvent<HTMLButtonElement>, symbol: string) {
+  event.stopPropagation();
+  const ticker = symbol.trim().split(/\s+/)[0] || symbol.trim();
+  const query = encodeURIComponent(`${ticker} financial news`);
+  openPopupWindow(`https://news.google.com/search?q=${query}`, "asset-news-search");
+}
+
+function openMarketIndexNews(label: string) {
+  const query = encodeURIComponent(`${label} index financial news`);
+  openPopupWindow(`https://news.google.com/search?q=${query}`, "market-index-news-search");
+}
+
+function formatMarketIndicatorValue(value: number, unit: MarketIndicatorQuote["unit"]) {
+  if (unit === "percent") return `${value.toFixed(3)}%`;
+  if (unit === "fx") return value.toFixed(4);
+  if (unit === "gold") {
+    return `$${value.toLocaleString("en-US", { maximumFractionDigits: 2 })}/oz`;
+  }
+  if (unit === "oil") return `$${value.toFixed(2)}/bbl`;
+  return value.toLocaleString("en-US", { maximumFractionDigits: 2 });
+}
+
+function formatMarketPriceTimestamp(value: string) {
+  const tradingDate = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (tradingDate) {
+    const [, year, month, day] = tradingDate;
+    const date = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)));
+    return `${date.toLocaleDateString([], {
+      month: "short",
+      day: "numeric",
+      year: Number(year) === new Date().getFullYear() ? undefined : "numeric",
+      timeZone: "UTC",
+    })} close`;
+  }
+  return new Date(value).toLocaleString([], {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function MarketSparkline({ values }: { values: number[] }) {
+  if (values.length < 2) return <span className="market-sparkline-empty">Trend unavailable</span>;
+  const width = 92;
+  const height = 32;
+  const minimum = Math.min(...values);
+  const maximum = Math.max(...values);
+  const range = maximum - minimum || 1;
+  const points = values.map((value, index) => {
+    const x = index / (values.length - 1) * width;
+    const y = height - 3 - (value - minimum) / range * (height - 6);
+    return `${x.toFixed(2)},${y.toFixed(2)}`;
+  }).join(" ");
+  const rising = values.at(-1)! >= values[0];
+  return (
+    <svg
+      className={`market-sparkline ${rising ? "market-sparkline-up" : "market-sparkline-down"}`}
+      viewBox={`0 0 ${width} ${height}`}
+      role="img"
+      aria-label={`30-day trend ${rising ? "up" : "down"}`}
+    >
+      <polyline points={points} fill="none" vectorEffect="non-scaling-stroke" />
+    </svg>
+  );
+}
 
 const MODEL_COPY: Record<ModelKind, { label: string; note: string }> = {
   historical: {
@@ -186,6 +345,175 @@ function EfficientFrontierChart({ data }: { data: EfficientFrontierResult }) {
   );
 }
 
+function RiskTrendChart({ points }: { points: RiskTrendPoint[] }) {
+  const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
+  const width = 760;
+  const height = 250;
+  const margin = { top: 18, right: 28, bottom: 34, left: 70 };
+  const plotWidth = width - margin.left - margin.right;
+  const maxVar = Math.max(...points.map((point) => point.var), 1);
+  const maxPercent = Math.max(...points.map((point) => point.varPercent), 0.0001);
+  const x = (index: number) => margin.left +
+    index / Math.max(points.length - 1, 1) * plotWidth;
+  const yVar = (value: number) => height - margin.bottom -
+    value / maxVar * (height - margin.top - margin.bottom);
+  const yPercent = (value: number) => height - margin.bottom -
+    value / maxPercent * (height - margin.top - margin.bottom);
+  const path = (values: number[], y: (value: number) => number) =>
+    values.map((value, index) =>
+      `${index ? "L" : "M"} ${x(index).toFixed(1)} ${y(value).toFixed(1)}`).join(" ");
+  const hoveredPoint = hoveredIndex === null ? null : points[hoveredIndex];
+  const tooltipWidth = 160;
+  const tooltipX = hoveredIndex === null
+    ? 0
+    : Math.min(Math.max(x(hoveredIndex) - tooltipWidth / 2, margin.left), width - margin.right - tooltipWidth);
+  const updateHoveredPoint = (clientX: number, chart: SVGSVGElement) => {
+    const bounds = chart.getBoundingClientRect();
+    const svgX = (clientX - bounds.left) / bounds.width * width;
+    const index = Math.round((svgX - margin.left) / plotWidth * Math.max(points.length - 1, 1));
+    setHoveredIndex(Math.max(0, Math.min(points.length - 1, index)));
+  };
+  return (
+    <svg
+      className="risk-trend-chart interactive-trend-chart"
+      viewBox={`0 0 ${width} ${height}`}
+      role="img"
+      onPointerMove={(event) => updateHoveredPoint(event.clientX, event.currentTarget)}
+      onPointerLeave={() => setHoveredIndex(null)}
+    >
+      <title>Portfolio value at risk trend</title>
+      <desc>Dollar value at risk and value at risk as a percentage of gross market value over persisted calculations.</desc>
+      {[0, 0.5, 1].map((fraction) => {
+        const y = height - margin.bottom -
+          fraction * (height - margin.top - margin.bottom);
+        return (
+          <g key={fraction}>
+            <line x1={margin.left} y1={y} x2={width - margin.right} y2={y} className="risk-trend-grid" />
+            <text x={margin.left - 10} y={y + 3} textAnchor="end">
+              {money.format(maxVar * fraction)}
+            </text>
+          </g>
+        );
+      })}
+      <path d={path(points.map((point) => point.var), yVar)} className="risk-trend-var" />
+      <path d={path(points.map((point) => point.varPercent), yPercent)} className="risk-trend-percent" />
+      {hoveredPoint && hoveredIndex !== null && (
+        <g className="trend-hover">
+          <line
+            x1={x(hoveredIndex)}
+            y1={margin.top}
+            x2={x(hoveredIndex)}
+            y2={height - margin.bottom}
+            className="trend-hover-guide"
+          />
+          <circle cx={x(hoveredIndex)} cy={yVar(hoveredPoint.var)} r="4.5" className="trend-hover-var-dot" />
+          <circle cx={x(hoveredIndex)} cy={yPercent(hoveredPoint.varPercent)} r="4" className="trend-hover-percent-dot" />
+          <g transform={`translate(${tooltipX} ${margin.top + 5})`}>
+            <rect width={tooltipWidth} height="54" rx="4" className="trend-tooltip-box" />
+            <text x="10" y="15" className="trend-tooltip-date">
+              {new Date(hoveredPoint.timestamp).toLocaleDateString()}
+            </text>
+            <text x="10" y="32" className="trend-tooltip-value">VaR {money.format(hoveredPoint.var)}</text>
+            <text x="10" y="46" className="trend-tooltip-secondary">
+              {percent.format(hoveredPoint.varPercent)} of gross value
+            </text>
+          </g>
+        </g>
+      )}
+      <text x={margin.left} y={height - 10}>
+        {new Date(points[0].timestamp).toLocaleDateString()}
+      </text>
+      <text x={width - margin.right} y={height - 10} textAnchor="end">
+        {new Date(points.at(-1)!.timestamp).toLocaleDateString()}
+      </text>
+    </svg>
+  );
+}
+
+function PortfolioBetaChart({ points }: { points: RiskTrendPoint[] }) {
+  const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
+  const width = 760;
+  const height = 210;
+  const margin = { top: 18, right: 28, bottom: 34, left: 70 };
+  const plotWidth = width - margin.left - margin.right;
+  const values = points.map((point) => point.portfolioBeta ?? 0);
+  const observedMinimum = Math.min(...values, 1);
+  const observedMaximum = Math.max(...values, 1);
+  const padding = Math.max((observedMaximum - observedMinimum) * 0.12, 0.05);
+  const minimum = observedMinimum - padding;
+  const maximum = observedMaximum + padding;
+  const x = (index: number) => margin.left +
+    index / Math.max(points.length - 1, 1) * plotWidth;
+  const y = (value: number) => margin.top +
+    (maximum - value) / (maximum - minimum) * (height - margin.top - margin.bottom);
+  const path = values.map((value, index) =>
+    `${index ? "L" : "M"} ${x(index).toFixed(1)} ${y(value).toFixed(1)}`).join(" ");
+  const ticks = [minimum, (minimum + maximum) / 2, maximum];
+  const hoveredPoint = hoveredIndex === null ? null : points[hoveredIndex];
+  const tooltipWidth = 145;
+  const tooltipX = hoveredIndex === null
+    ? 0
+    : Math.min(Math.max(x(hoveredIndex) - tooltipWidth / 2, margin.left), width - margin.right - tooltipWidth);
+  const updateHoveredPoint = (clientX: number, chart: SVGSVGElement) => {
+    const bounds = chart.getBoundingClientRect();
+    const svgX = (clientX - bounds.left) / bounds.width * width;
+    const index = Math.round((svgX - margin.left) / plotWidth * Math.max(points.length - 1, 1));
+    setHoveredIndex(Math.max(0, Math.min(points.length - 1, index)));
+  };
+  return (
+    <svg
+      className="beta-trend-chart interactive-trend-chart"
+      viewBox={`0 0 ${width} ${height}`}
+      role="img"
+      onPointerMove={(event) => updateHoveredPoint(event.clientX, event.currentTarget)}
+      onPointerLeave={() => setHoveredIndex(null)}
+    >
+      <title>Thirty-day fixed-portfolio beta trend</title>
+      <desc>Trailing portfolio beta against SPY for the current holdings over the prior 30 trading days.</desc>
+      {ticks.map((tick) => (
+        <g key={tick}>
+          <line x1={margin.left} y1={y(tick)} x2={width - margin.right} y2={y(tick)} className="risk-trend-grid" />
+          <text x={margin.left - 10} y={y(tick) + 3} textAnchor="end">{tick.toFixed(2)}</text>
+        </g>
+      ))}
+      <line x1={margin.left} y1={y(1)} x2={width - margin.right} y2={y(1)} className="beta-reference" />
+      <path d={path} className="beta-trend-line" />
+      {hoveredPoint && hoveredIndex !== null && (
+        <g className="trend-hover">
+          <line
+            x1={x(hoveredIndex)}
+            y1={margin.top}
+            x2={x(hoveredIndex)}
+            y2={height - margin.bottom}
+            className="trend-hover-guide"
+          />
+          <circle
+            cx={x(hoveredIndex)}
+            cy={y(hoveredPoint.portfolioBeta ?? 0)}
+            r="4.5"
+            className="trend-hover-beta-dot"
+          />
+          <g transform={`translate(${tooltipX} ${margin.top + 5})`}>
+            <rect width={tooltipWidth} height="40" rx="4" className="trend-tooltip-box" />
+            <text x="10" y="15" className="trend-tooltip-date">
+              {new Date(hoveredPoint.timestamp).toLocaleDateString()}
+            </text>
+            <text x="10" y="32" className="trend-tooltip-value">
+              Beta {(hoveredPoint.portfolioBeta ?? 0).toFixed(3)}
+            </text>
+          </g>
+        </g>
+      )}
+      <text x={margin.left} y={height - 10}>
+        {new Date(points[0].timestamp).toLocaleDateString()}
+      </text>
+      <text x={width - margin.right} y={height - 10} textAnchor="end">
+        {new Date(points.at(-1)!.timestamp).toLocaleDateString()}
+      </text>
+    </svg>
+  );
+}
+
 export function RiskWorkbench() {
   const [positions, setPositions] = useState<Position[]>(DEFAULT_POSITIONS);
   const positionsRef = useRef(positions);
@@ -198,13 +526,27 @@ export function RiskWorkbench() {
   const [importBusy, setImportBusy] = useState(false);
   const [importInputKey, setImportInputKey] = useState(0);
   const [history, setHistory] = useState<HistoricalData>();
+  const [positionsRefreshing, setPositionsRefreshing] = useState(false);
+  const [marketBriefing, setMarketBriefing] = useState<MarketBriefing>();
+  const [marketBriefingError, setMarketBriefingError] = useState("");
+  const [marketBriefingRefreshing, setMarketBriefingRefreshing] = useState(false);
+  const [headlinePage, setHeadlinePage] = useState(0);
+  const [headlineBatch, setHeadlineBatch] = useState(0);
+  const [headlinesLoading, setHeadlinesLoading] = useState(false);
+  const [headlineLoadError, setHeadlineLoadError] = useState("");
   const [historyStatus, setHistoryStatus] = useState("Loading market history…");
   const [remoteResult, setRemoteResult] = useState<RiskResult>();
+  const [riskTrend, setRiskTrend] = useState<RiskTrend>();
+  const [riskTrendStatus, setRiskTrendStatus] = useState("Waiting for persisted risk history…");
+  const [backcastTrend, setBackcastTrend] = useState<BackcastTrend>();
+  const [backcastStatus, setBackcastStatus] = useState("Calculating fixed-portfolio backcast…");
+  const [riskMonitorMode, setRiskMonitorMode] = useState<"backcast" | "actual">("backcast");
   const [engineStatus, setEngineStatus] = useState("Connecting to Python engine…");
   const [positionDraft, setPositionDraft] = useState(emptyPositionDraft);
   const [portfolioVersions, setPortfolioVersions] = useState<PortfolioVersion[]>([]);
   const [selectedVersionId, setSelectedVersionId] = useState("");
   const [portfolioSaveStatus, setPortfolioSaveStatus] = useState("Loading saved default…");
+  const [portfolioLoaded, setPortfolioLoaded] = useState(false);
   const [rateCalibration, setRateCalibration] = useState<HullWhiteCalibration>();
   const [selectedRateModel, setSelectedRateModel] = useState<RateModelName>("Hull-White 1F");
   const [rateModelLoaded, setRateModelLoaded] = useState(false);
@@ -221,7 +563,73 @@ export function RiskWorkbench() {
 
   useEffect(() => {
     const controller = new AbortController();
-    void fetch("/api/portfolios", { signal: controller.signal })
+    void refreshMarketBriefing(controller.signal);
+    return () => controller.abort();
+  }, []);
+
+  async function refreshMarketBriefing(signal?: AbortSignal) {
+    setMarketBriefingRefreshing(true);
+    setMarketBriefingError("");
+    try {
+      const response = await fetch(apiUrl("/api/market/briefing"), {
+        signal,
+        cache: "no-store",
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.detail ?? "Market briefing is unavailable.");
+      setMarketBriefing(payload as MarketBriefing);
+      setHeadlinePage(0);
+      setHeadlineBatch(0);
+      setHeadlineLoadError("");
+    } catch (error) {
+      if (!signal?.aborted) {
+        setMarketBriefingError(error instanceof Error ? error.message : "Market briefing is unavailable.");
+      }
+    } finally {
+      if (!signal?.aborted) setMarketBriefingRefreshing(false);
+    }
+  }
+
+  async function showNextHeadlines() {
+    if (headlinePage + 1 < headlinePageCount) {
+      setHeadlinePage((current) => current + 1);
+      return;
+    }
+
+    setHeadlinesLoading(true);
+    setHeadlineLoadError("");
+    try {
+      const response = await fetch(apiUrl(`/api/market/headlines?batch=${headlineBatch}`), {
+        cache: "no-store",
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.detail ?? "More headlines are unavailable.");
+
+      const existingUrls = new Set(marketBriefing?.headlines.map((headline) => headline.url) ?? []);
+      const additionalHeadlines = (payload.headlines as MarketBriefing["headlines"])
+        .filter((headline) => !existingUrls.has(headline.url));
+      setHeadlineBatch(Number(payload.nextBatch));
+
+      if (!additionalHeadlines.length) {
+        setHeadlineLoadError("No new articles were returned for this batch. Click again to try another market topic.");
+        return;
+      }
+
+      setMarketBriefing((current) => current ? {
+        ...current,
+        headlines: [...current.headlines, ...additionalHeadlines],
+      } : current);
+      setHeadlinePage((current) => current + 1);
+    } catch (error) {
+      setHeadlineLoadError(error instanceof Error ? error.message : "More headlines are unavailable.");
+    } finally {
+      setHeadlinesLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetch(apiUrl("/api/portfolios"), { signal: controller.signal })
       .then(async (response) => {
         const payload = await response.json();
         if (!response.ok) throw new Error(payload.error ?? "Unable to load saved portfolios.");
@@ -234,6 +642,9 @@ export function RiskWorkbench() {
             marketPrice: undefined,
             marketPriceAt: undefined,
             marketPriceSource: undefined,
+            marketPriceModel: undefined,
+            marketPriceRate: undefined,
+            marketPriceRateTenor: undefined,
             riskSource: position.riskSource === "provided" ? "provided" : "historical-pending",
           })));
           setPortfolioSaveStatus(`Saved default from ${new Date(savedDefault.createdAt).toLocaleString()}.`);
@@ -244,13 +655,16 @@ export function RiskWorkbench() {
       .catch((error) => {
         if (controller.signal.aborted) return;
         setPortfolioSaveStatus(error instanceof Error ? error.message : "Unable to load saved portfolios.");
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setPortfolioLoaded(true);
       });
     return () => controller.abort();
   }, []);
 
   useEffect(() => {
     const controller = new AbortController();
-    void fetch(`/api/rates?model=${encodeURIComponent(selectedRateModel)}`, {
+    void fetch(apiUrl(`/api/rates?model=${encodeURIComponent(selectedRateModel)}`), {
       signal: controller.signal,
     })
       .then(async (response) => {
@@ -281,56 +695,89 @@ export function RiskWorkbench() {
     [positions],
   );
 
+  const loadPositionMarketData = useCallback(async (
+    signal: AbortSignal,
+    forceRefresh = false,
+  ) => {
+    if (!symbolsKey || !rateModelLoaded) return;
+    if (forceRefresh) setPositionsRefreshing(true);
+    setHistoryStatus(forceRefresh
+      ? "Refreshing latest market data and recalculating portfolio…"
+      : "Loading market history…");
+    try {
+      const query = new URLSearchParams({ symbols: symbolsKey });
+      if (forceRefresh) query.set("refresh", "1");
+      const response = await fetch(apiUrl(`/api/history?${query}`), {
+        signal,
+        cache: forceRefresh ? "no-store" : "default",
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error ?? payload.detail ?? "Unable to load market history.");
+      if (forceRefresh) {
+        setHistoryStatus("Fresh market-data download complete; recalculating all dependent metrics…");
+      }
+      setHistory(payload as HistoricalData);
+      const enriched = enrichPositionsWithHistoricalRisk(
+        positionsRef.current,
+        payload as HistoricalData,
+        new Date(),
+        rateCalibration,
+        forceRefresh,
+      );
+      setPositions(enriched);
+      const retrievedTimes = (payload as HistoricalData).series
+        .map((item) => item.retrievedAt)
+        .filter((value): value is string => Boolean(value));
+      const latestRetrieval = retrievedTimes.sort().at(-1) ?? payload.fetchedAt;
+      setHistoryStatus(forceRefresh
+        ? `Fresh data downloaded ${new Date(latestRetrieval).toLocaleString()}; all dependent metrics recalculated.`
+        : "Latest eligible prices and market history loaded.");
+      try {
+        const persistResponse = await fetch(apiUrl("/api/portfolios"), {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ positions: enriched }),
+          signal,
+        });
+        const persistPayload = await persistResponse.json();
+        if (!persistResponse.ok) {
+          throw new Error(persistPayload.error ?? persistPayload.detail ?? "Calculated values could not be saved.");
+        }
+        setPortfolioVersions(persistPayload.versions as PortfolioVersion[]);
+        setPortfolioSaveStatus(forceRefresh
+          ? "Refreshed prices and calculated values saved to the current default."
+          : "Calculated risk factors saved to the current default.");
+      } catch (error) {
+        if (signal.aborted) return;
+        setPortfolioSaveStatus(
+          error instanceof Error ? error.message : "Calculated values could not be saved.",
+        );
+      }
+    } catch (error) {
+      if (signal.aborted) return;
+      if (!forceRefresh) setHistory(undefined);
+      setHistoryStatus(error instanceof Error ? error.message : "Unable to load market history.");
+    } finally {
+      if (forceRefresh && !signal.aborted) setPositionsRefreshing(false);
+    }
+  }, [rateCalibration, rateModelLoaded, symbolsKey]);
+
+  async function refreshPositionMarketData() {
+    const controller = new AbortController();
+    await loadPositionMarketData(controller.signal, true);
+  }
+
   useEffect(() => {
     if (!symbolsKey || !rateModelLoaded) return;
     const controller = new AbortController();
-    const timer = window.setTimeout(async () => {
-      setHistoryStatus("Loading market history…");
-      try {
-        const response = await fetch(`/api/history?symbols=${encodeURIComponent(symbolsKey)}`, {
-          signal: controller.signal,
-        });
-        const payload = await response.json();
-        if (!response.ok) throw new Error(payload.error ?? "Unable to load market history.");
-        setHistory(payload as HistoricalData);
-        const enriched = enrichPositionsWithHistoricalRisk(
-          positionsRef.current,
-          payload as HistoricalData,
-          new Date(),
-          rateCalibration,
-        );
-        setPositions(enriched);
-        setHistoryStatus("Latest eligible prices and market history loaded.");
-        try {
-          const persistResponse = await fetch("/api/portfolios", {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ positions: enriched }),
-            signal: controller.signal,
-          });
-          const persistPayload = await persistResponse.json();
-          if (!persistResponse.ok) {
-            throw new Error(persistPayload.error ?? "Calculated risk factors could not be saved.");
-          }
-          setPortfolioVersions(persistPayload.versions as PortfolioVersion[]);
-          setPortfolioSaveStatus("Calculated risk factors saved to the current default.");
-        } catch (error) {
-          if (controller.signal.aborted) return;
-          setPortfolioSaveStatus(
-            error instanceof Error ? error.message : "Calculated risk factors could not be saved.",
-          );
-        }
-      } catch (error) {
-        if (controller.signal.aborted) return;
-        setHistory(undefined);
-        setHistoryStatus(error instanceof Error ? error.message : "Unable to load market history.");
-      }
+    const timer = window.setTimeout(() => {
+      void loadPositionMarketData(controller.signal);
     }, 350);
     return () => {
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [symbolsKey, rateCalibration, rateModelLoaded]);
+  }, [loadPositionMarketData, rateModelLoaded, symbolsKey]);
 
   const continuityResult: RiskResult = useMemo(
     () => calculateRisk(positions, model, confidence, horizon, history),
@@ -338,12 +785,13 @@ export function RiskWorkbench() {
   );
 
   useEffect(() => {
+    if (!portfolioLoaded) return;
     const controller = new AbortController();
     const timer = window.setTimeout(async () => {
       setRemoteResult(undefined);
       setEngineStatus("Connecting to Python engine…");
       try {
-        const response = await fetch("/api/risk", {
+        const response = await fetch(apiUrl("/api/risk"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ positions, model, confidence, horizon }),
@@ -367,11 +815,143 @@ export function RiskWorkbench() {
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [positions, model, confidence, horizon]);
+  }, [positions, model, confidence, horizon, portfolioLoaded]);
 
   const result = remoteResult ?? continuityResult;
+  useEffect(() => {
+    if (!remoteResult?.runId) return;
+    const controller = new AbortController();
+    const params = new URLSearchParams({
+      model,
+      confidence: String(confidence),
+      horizon: String(horizon),
+      limit: "180",
+      portfolio: remoteResult.portfolioKey ?? "",
+      frequency: "daily",
+    });
+    void fetch(apiUrl(`/api/risk-history?${params}`), {
+      cache: "no-store",
+      signal: controller.signal,
+    }).then(async (response) => {
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error ?? payload.detail ?? "Risk history unavailable.");
+      setRiskTrend(payload as RiskTrend);
+      const excluded = Number(payload.excludedInvalidPoints ?? 0);
+      setRiskTrendStatus(
+        payload.points.length > 1
+          ? `${payload.points.length} comparable persisted calculations${
+              excluded ? ` · ${excluded} invalid legacy point${excluded === 1 ? "" : "s"} excluded` : ""
+            }`
+          : "One persisted calculation; trends appear after the next comparable run.",
+      );
+    }).catch((error) => {
+      if (controller.signal.aborted) return;
+      setRiskTrend(undefined);
+      setRiskTrendStatus(error instanceof Error ? error.message : "Risk history unavailable.");
+    });
+    return () => controller.abort();
+  }, [confidence, horizon, model, remoteResult?.portfolioKey, remoteResult?.runId]);
+  useEffect(() => {
+    if (!portfolioLoaded) return;
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      setBackcastStatus("Calculating fixed-portfolio backcast…");
+      void fetch(apiUrl("/api/risk-backcast"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          positions,
+          model,
+          confidence,
+          horizon,
+          days: 30,
+          lookback: 252,
+        }),
+        signal: controller.signal,
+      }).then(async (response) => {
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.error ?? payload.detail ?? "Backcast unavailable.");
+        setBackcastTrend(payload as BackcastTrend);
+        setBackcastStatus(
+          `${payload.points.length} trading-day fixed-portfolio backcast · ${payload.lookback}-day factor window`,
+        );
+      }).catch((error) => {
+        if (controller.signal.aborted) return;
+        setBackcastTrend(undefined);
+        setBackcastStatus(error instanceof Error ? error.message : "Backcast unavailable.");
+      });
+    }, 450);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [confidence, horizon, model, portfolioLoaded, positions]);
+  const activeRiskTrend = remoteResult?.runId ? riskTrend : undefined;
+  const activeRiskTrendStatus = remoteResult?.runId
+    ? riskTrendStatus
+    : "Risk trends require the Python audit service.";
+  const monitorPoints = riskMonitorMode === "backcast"
+    ? backcastTrend?.points
+    : activeRiskTrend?.points;
+  const monitorStatus = riskMonitorMode === "backcast"
+    ? backcastStatus
+    : activeRiskTrendStatus;
+  const latestRiskTrend = monitorPoints?.at(-1);
+  const diagnosticWarnings = useMemo(() => {
+    const warnings: string[] = [];
+    const fallbackPositions = positions.filter((position) => position.riskSource === "fallback");
+    const pendingPositions = positions.filter((position) => position.riskSource === "historical-pending");
+    if (!remoteResult) warnings.push("Python backend is unavailable; the TypeScript continuity engine is active.");
+    if (!history) warnings.push("Market history is unavailable, so historical coverage cannot be validated.");
+    if (fallbackPositions.length) {
+      warnings.push(`${fallbackPositions.length} position${fallbackPositions.length === 1 ? "" : "s"} use fallback risk factors.`);
+    }
+    if (pendingPositions.length) {
+      warnings.push(`${pendingPositions.length} position${pendingPositions.length === 1 ? "" : "s"} still await calculated historical risk factors.`);
+    }
+    if (model === "historical" && result.observations < 250) {
+      warnings.push(`Only ${result.observations.toLocaleString()} synchronized historical scenarios are available; at least 250 are preferred.`);
+    }
+    if (result.varFloorApplied) {
+      warnings.push(
+        `Historical VaR was nonpositive, so the volatility-based ${money.format(result.varFloor ?? 0)} VaR floor was applied.`,
+      );
+    }
+    if (rateCalibration?.fallbackUsed) {
+      warnings.push(`The ${rateCalibration.model} calibration uses governed fallback parameters: ${rateCalibration.fallbackReason ?? "Treasury history was unavailable"}.`);
+    }
+    if (rateCalibration && rateCalibration.fitRmse > 20) {
+      warnings.push(`${rateCalibration.model} curve-factor reconstruction error is ${rateCalibration.fitRmse.toFixed(2)} bp, above the 20 bp review threshold.`);
+    }
+    if (rateCalibration && rateCalibration.observationCount && rateCalibration.observationCount < 500) {
+      warnings.push(`The rate calibration uses only ${rateCalibration.observationCount.toLocaleString()} observations.`);
+    }
+    return warnings;
+  }, [
+    history,
+    model,
+    positions,
+    rateCalibration,
+    remoteResult,
+    result.observations,
+    result.varFloor,
+    result.varFloorApplied,
+  ]);
+  const rateFitQuality = !rateCalibration
+    ? "Unavailable"
+    : rateCalibration.fallbackUsed
+      ? "Fallback"
+      : rateCalibration.fitRmse <= 10
+        ? "Strong"
+        : rateCalibration.fitRmse <= 20
+          ? "Acceptable"
+          : "Review";
   const frontier = useMemo(
     () => calculateEfficientFrontier(positions, history),
+    [positions, history],
+  );
+  const portfolioAlphaBeta = useMemo(
+    () => calculatePortfolioAlphaBeta(positions, history),
     [positions, history],
   );
   const displayedPositions = useMemo(
@@ -401,6 +981,20 @@ export function RiskWorkbench() {
     },
     [manualPositionOrder, positionSort, positions],
   );
+  const positionTrends = useMemo(() => {
+    const trends = new Map<string, number[]>();
+    for (const series of history?.series ?? []) {
+      const latestDate = series.dates.at(-1);
+      if (!latestDate) continue;
+      const cutoff = new Date(latestDate).getTime() - 30 * 24 * 60 * 60 * 1000;
+      const values = series.adjustedClose.filter((_, index) => {
+        const time = new Date(series.dates[index]).getTime();
+        return Number.isFinite(time) && time >= cutoff;
+      });
+      trends.set(series.symbol.toUpperCase(), values);
+    }
+    return trends;
+  }, [history]);
 
   function togglePositionSort(field: SortField) {
     setPositionSort((current) => current?.field === field
@@ -466,6 +1060,9 @@ export function RiskWorkbench() {
           updated.marketPrice = undefined;
           updated.marketPriceAt = undefined;
           updated.marketPriceSource = undefined;
+          updated.marketPriceModel = undefined;
+          updated.marketPriceRate = undefined;
+          updated.marketPriceRateTenor = undefined;
           updated.riskSource = "historical-pending";
         }
         if (field === "volatility" || field === "beta" || field === "delta") {
@@ -481,7 +1078,7 @@ export function RiskWorkbench() {
     previousPositions: Position[],
     sourceName = "Edited portfolio",
   ) {
-    const response = await fetch("/api/portfolios", {
+    const response = await fetch(apiUrl("/api/portfolios"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ positions: nextPositions, previousPositions, sourceName }),
@@ -498,7 +1095,7 @@ export function RiskWorkbench() {
     const symbol = positionDraft.symbol.trim().toUpperCase();
     const quantity = Number(positionDraft.quantity);
     const price = Number(positionDraft.price);
-    const multiplier = Number(positionDraft.multiplier) || 1;
+    const multiplier = positionDraft.type.endsWith("Option") ? 100 : 1;
     if (!symbol || !Number.isFinite(quantity) || quantity === 0 ||
         !Number.isFinite(price) || price < 0) {
       setMessage("Enter a symbol, non-zero quantity, and valid unit price before adding.");
@@ -557,7 +1154,7 @@ export function RiskWorkbench() {
     setRateModelStatus("Refreshing the Treasury curve and storing a new calibration…");
     try {
       const response = await fetch(
-        `/api/rates?model=${encodeURIComponent(selectedRateModel)}`,
+        apiUrl(`/api/rates?model=${encodeURIComponent(selectedRateModel)}`),
         { method: "POST" },
       );
       const payload = await response.json();
@@ -648,6 +1245,10 @@ export function RiskWorkbench() {
     setImportBusy(false);
   }
 
+  const headlinePageCount = Math.ceil((marketBriefing?.headlines.length ?? 0) / 5);
+  const headlineStart = headlinePage * 5;
+  const visibleHeadlines = marketBriefing?.headlines.slice(headlineStart, headlineStart + 5) ?? [];
+
   return (
     <main>
       <header className="topbar">
@@ -667,6 +1268,136 @@ export function RiskWorkbench() {
         <div className="status"><i /> {engineStatus}</div>
       </header>
 
+      <section className="market-briefing" aria-label="Live market briefing with 30-day market trends">
+        <div className="market-indicators">
+          {marketBriefing?.indicators.length ? marketBriefing.indicators.map((indicator) => (
+            <article
+              key={indicator.symbol}
+              role="button"
+              tabIndex={0}
+              aria-label={`Search news for ${indicator.label}`}
+              title={`Search news for ${indicator.label}`}
+              onClick={() => openMarketIndexNews(indicator.label)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  openMarketIndexNews(indicator.label);
+                }
+              }}
+            >
+              <span>{indicator.label}</span>
+              <strong>{formatMarketIndicatorValue(indicator.value, indicator.unit)}</strong>
+              <MarketSparkline values={indicator.trend} />
+              <small>
+                <span className={indicator.change >= 0 ? "market-up" : "market-down"}>
+                  {indicator.change >= 0 ? "+" : ""}
+                  {indicator.unit === "percent"
+                    ? `${indicator.change.toFixed(3)} pts`
+                    : `${indicator.change.toFixed(2)} (${percent.format(indicator.percentChange)})`}
+                  {" "}vs previous close
+                </span>
+                <span className="market-previous-close">
+                  Previous close {formatMarketIndicatorValue(indicator.previousClose, indicator.unit)}
+                </span>
+              </small>
+              <em>
+                {indicator.marketState.toLowerCase()} · as of{" "}
+                {new Date(indicator.asOf).toLocaleString([], {
+                  year: "numeric",
+                  month: "short",
+                  day: "numeric",
+                  hour: "numeric",
+                  minute: "2-digit",
+                  timeZoneName: "short",
+                })}
+              </em>
+              {indicator.future ? (
+                <div className="market-future">
+                  <b>Futures</b>
+                  <span>{indicator.future.value.toLocaleString("en-US", { maximumFractionDigits: 2 })}</span>
+                  <small className={indicator.future.change >= 0 ? "market-up" : "market-down"}>
+                    {indicator.future.change >= 0 ? "+" : ""}
+                    {indicator.future.change.toFixed(2)} ({percent.format(indicator.future.percentChange)})
+                  </small>
+                  <time dateTime={indicator.future.asOf}>
+                    as of {new Date(indicator.future.asOf).toLocaleString([], {
+                      year: "numeric",
+                      month: "short",
+                      day: "numeric",
+                      hour: "numeric",
+                      minute: "2-digit",
+                      timeZoneName: "short",
+                    })}
+                  </time>
+                </div>
+              ) : null}
+            </article>
+          )) : (
+            <p className="market-loading">{marketBriefingError || "Loading live market indicators…"}</p>
+          )}
+        </div>
+        <div className="market-headlines">
+          <header>
+            <span>Yahoo Finance headlines</span>
+            <small>{marketBriefing ? `Updated ${new Date(marketBriefing.fetchedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : "Loading…"}</small>
+            {marketBriefing?.headlines.length ? (
+              <small>
+                Showing {headlineStart + 1}–{Math.min(headlineStart + 5, marketBriefing.headlines.length)} of{" "}
+                {marketBriefing.headlines.length}
+              </small>
+            ) : null}
+            <div className="headline-actions">
+              <button
+                className="headline-refresh"
+                type="button"
+                onClick={() => void refreshMarketBriefing()}
+                disabled={marketBriefingRefreshing}
+              >
+                {marketBriefingRefreshing ? "Refreshing…" : "Refresh market data"}
+              </button>
+              <button
+                className="headline-next"
+                type="button"
+                onClick={() => void showNextHeadlines()}
+                disabled={!marketBriefing?.headlines.length || headlinesLoading}
+                aria-busy={headlinesLoading}
+              >
+                {headlinesLoading
+                  ? "Loading more…"
+                  : headlinePage + 1 >= headlinePageCount
+                    ? "Load more headlines"
+                    : "Next 5 headlines"}
+              </button>
+            </div>
+          </header>
+          {visibleHeadlines.length ? (
+            <ol style={{ counterReset: `headlines ${headlineStart}` }}>
+              {visibleHeadlines.map((headline) => (
+                <li key={headline.url}>
+                  <a
+                    href={headline.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    onClick={(event) => openNewsArticle(event, headline.url)}
+                  >
+                    {headline.title}
+                  </a>
+                </li>
+              ))}
+            </ol>
+          ) : <p>{marketBriefingError || "Loading five current headlines…"}</p>}
+          {marketBriefing?.warnings.length ? (
+            <small className="market-feed-warning">{marketBriefing.warnings.join(" ")}</small>
+          ) : null}
+          {headlineLoadError ? (
+            <small className="market-feed-warning">{headlineLoadError}</small>
+          ) : null}
+        </div>
+        <p className="market-disclosure">
+          {marketBriefing?.disclosures.join(" ") ?? "Quotes may be delayed. The money-market reading uses the 13-week Treasury-bill yield as a proxy."}
+        </p>
+      </section>
+
       <section className="hero" id="top">
         <div>
           <p className="eyebrow">Risk workspace / USD base currency</p>
@@ -679,6 +1410,16 @@ export function RiskWorkbench() {
         <div className="hero-aside">
           <span>Portfolio market value</span>
           <strong>{money.format(result.marketValue)}</strong>
+          <div className="portfolio-market-stats">
+            <div title="Annualized regression intercept of portfolio returns against SPY">
+              <span>Historical alpha</span>
+              <b>{portfolioAlphaBeta ? percent.format(portfolioAlphaBeta.alpha) : "Loading…"}</b>
+            </div>
+            <div title="Historical portfolio return sensitivity to SPY">
+              <span>Portfolio beta</span>
+              <b>{portfolioAlphaBeta ? portfolioAlphaBeta.beta.toFixed(2) : "Loading…"}</b>
+            </div>
+          </div>
           <small>{positions.length} positions · {result.observations.toLocaleString()} scenarios</small>
         </div>
       </section>
@@ -764,8 +1505,8 @@ export function RiskWorkbench() {
           <h2 id="rate-model-title">{selectedRateModel}</h2>
           <p>
             {selectedRateModel === "G2++ 2F"
-              ? "Two correlated mean-reverting factors represent level and slope movements while fitting the observed Treasury curve."
-              : "One mean-reverting factor fits the observed Treasury curve with a transparent governed parameter set."}
+              ? "Two correlated PCA factors represent level and slope movements, with dynamics estimated from ten years of Treasury curves."
+              : "One PCA level factor fits the Treasury curve, with dynamics estimated from ten years of observations."}
           </p>
           <label htmlFor="rate-model-select">Interest-rate model</label>
           <select
@@ -786,17 +1527,36 @@ export function RiskWorkbench() {
           <dl>
             <div><dt>Curve date</dt><dd>{new Date(rateCalibration.curveDate).toLocaleDateString()}</dd></div>
             <div><dt>Calibrated</dt><dd>{new Date(rateCalibration.calibratedAt).toLocaleString()}</dd></div>
-            <div><dt>Mean reversion (a)</dt><dd>{percent.format(rateCalibration.meanReversion)}</dd></div>
+            <div><dt>Mean reversion (a)</dt><dd>{rateCalibration.meanReversion.toFixed(3)} /yr</dd></div>
             <div><dt>Volatility (σ)</dt><dd>{percent.format(rateCalibration.volatility)}</dd></div>
             {rateCalibration.model === "G2++ 2F" ? (
               <>
-                <div><dt>Second mean reversion (b)</dt><dd>{percent.format(rateCalibration.secondFactorMeanReversion ?? 0)}</dd></div>
+                <div><dt>Second mean reversion (b)</dt><dd>{(rateCalibration.secondFactorMeanReversion ?? 0).toFixed(3)} /yr</dd></div>
                 <div><dt>Second volatility (η)</dt><dd>{percent.format(rateCalibration.secondFactorVolatility ?? 0)}</dd></div>
                 <div><dt>Factor correlation (ρ)</dt><dd>{(rateCalibration.factorCorrelation ?? 0).toFixed(2)}</dd></div>
               </>
             ) : null}
             <div><dt>Curve nodes</dt><dd>{rateCalibration.curve.length}</dd></div>
-            <div><dt>Parameter source</dt><dd>Governed default</dd></div>
+            <div><dt>Parameter source</dt><dd>{rateCalibration.calibrationSource ?? (rateCalibration.parameterSource === "governed-default" ? "Governed default" : rateCalibration.parameterSource)}</dd></div>
+            {rateCalibration.calibrationObjective ? (
+              <div><dt>Method</dt><dd>{rateCalibration.calibrationObjective}</dd></div>
+            ) : null}
+            {rateCalibration.observationCount ? (
+              <div><dt>Observations</dt><dd>{rateCalibration.observationCount.toLocaleString()}</dd></div>
+            ) : null}
+            {rateCalibration.calibrationWindowStart && rateCalibration.calibrationWindowEnd ? (
+              <div><dt>Calibration window</dt><dd>{rateCalibration.calibrationWindowStart} to {rateCalibration.calibrationWindowEnd}</dd></div>
+            ) : null}
+            {rateCalibration.meanReversionConfidenceInterval ? (
+              <div><dt>a 95% interval</dt><dd>{rateCalibration.meanReversionConfidenceInterval.map((value) => value.toFixed(3)).join("–")} /yr</dd></div>
+            ) : null}
+            {rateCalibration.secondFactorMeanReversionConfidenceInterval ? (
+              <div><dt>b 95% interval</dt><dd>{rateCalibration.secondFactorMeanReversionConfidenceInterval.map((value) => value.toFixed(3)).join("–")} /yr</dd></div>
+            ) : null}
+            <div><dt>Historical fit RMSE</dt><dd>{rateCalibration.fitRmse.toFixed(2)} bp</dd></div>
+            {rateCalibration.fallbackUsed ? (
+              <div><dt>Fallback</dt><dd>Yes — {rateCalibration.fallbackReason ?? "historical calibration unavailable"}</dd></div>
+            ) : null}
           </dl>
         ) : <p className="rate-model-empty">No valid stored calibration is available.</p>}
         <div className="rate-model-action">
@@ -812,6 +1572,59 @@ export function RiskWorkbench() {
           </small>
         </div>
       </section>
+
+      <details className="diagnostics panel" id="diagnostics">
+        <summary>
+          <span>
+            <span className="eyebrow">Backend model governance</span>
+            <strong>Fit quality & data diagnostics</strong>
+          </span>
+          <span className={`diagnostic-overall ${diagnosticWarnings.length ? "diagnostic-review" : "diagnostic-healthy"}`}>
+            {diagnosticWarnings.length ? `${diagnosticWarnings.length} item${diagnosticWarnings.length === 1 ? "" : "s"} to review` : "No active warnings"}
+          </span>
+        </summary>
+        <div className="diagnostic-grid">
+          <article>
+            <header><span>Risk engine</span><strong>{remoteResult ? "Connected" : "Continuity mode"}</strong></header>
+            <dl>
+              <div><dt>Backend</dt><dd>{remoteResult ? "Python + SQLAlchemy" : "TypeScript fallback"}</dd></div>
+              <div><dt>Active model</dt><dd>{MODEL_COPY[model].label}</dd></div>
+              <div><dt>Scenarios</dt><dd>{result.observations.toLocaleString()}</dd></div>
+              <div><dt>Coverage</dt><dd>{result.historyStart && result.historyEnd ? `${result.historyStart} to ${result.historyEnd}` : "Unavailable"}</dd></div>
+              <div><dt>Audit record</dt><dd>{result.runId ? `Run ${result.runId}` : "Not persisted"}</dd></div>
+            </dl>
+          </article>
+          <article>
+            <header><span>Interest-rate fit</span><strong className={`fit-${rateFitQuality.toLowerCase()}`}>{rateFitQuality}</strong></header>
+            <dl>
+              <div><dt>Model</dt><dd>{rateCalibration?.model ?? "Unavailable"}</dd></div>
+              <div><dt>Fit RMSE</dt><dd>{rateCalibration ? `${rateCalibration.fitRmse.toFixed(2)} bp` : "Unavailable"}</dd></div>
+              <div><dt>Observations</dt><dd>{rateCalibration?.observationCount?.toLocaleString() ?? "Unavailable"}</dd></div>
+              <div><dt>Window</dt><dd>{rateCalibration?.calibrationWindowStart && rateCalibration.calibrationWindowEnd ? `${rateCalibration.calibrationWindowStart} to ${rateCalibration.calibrationWindowEnd}` : "Unavailable"}</dd></div>
+              <div><dt>Method</dt><dd>{rateCalibration?.calibrationObjective ?? "Governed parameters"}</dd></div>
+            </dl>
+          </article>
+          <article>
+            <header><span>Market data</span><strong>{history ? "Loaded" : "Unavailable"}</strong></header>
+            <dl>
+              <div><dt>Price source</dt><dd>{history?.source ?? "Unavailable"}</dd></div>
+              <div><dt>Series loaded</dt><dd>{history?.series.length.toLocaleString() ?? "0"}</dd></div>
+              <div><dt>Fetched</dt><dd>{history?.fetchedAt ? new Date(history.fetchedAt).toLocaleString() : "Unavailable"}</dd></div>
+              <div><dt>Rate source</dt><dd>{rateCalibration?.curveSource ?? "Unavailable"}</dd></div>
+              <div><dt>Persistence</dt><dd>SQLite market cache and portfolio versions</dd></div>
+            </dl>
+          </article>
+        </div>
+        <div className="diagnostic-warnings">
+          <h3>Data-quality warnings</h3>
+          {diagnosticWarnings.length ? (
+            <ul>{diagnosticWarnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>
+          ) : (
+            <p>No current backend fit or data-coverage warning crossed its review threshold.</p>
+          )}
+          <small>Thresholds: rate-factor RMSE above 20 bp, fewer than 500 rate observations, fewer than 250 synchronized historical scenarios, fallback parameters, pending risk factors, or unavailable Python/history services.</small>
+        </div>
+      </details>
 
       <section className="metrics" id="overview">
         <Metric
@@ -894,12 +1707,99 @@ export function RiskWorkbench() {
                   <strong>{item.symbol}</strong>
                   <small>{item.type}</small>
                 </div>
-                <div className="bar"><i style={{ width: `${item.share * 100}%` }} /></div>
+                <div className="bar">
+                  <i
+                    className={item.share < 0 ? "bar-hedge" : ""}
+                    style={{ width: `${Math.min(100, Math.abs(item.share) * 100)}%` }}
+                  />
+                </div>
                 <b>{percent.format(item.share)}</b>
               </div>
             ))}
           </div>
         </article>
+      </section>
+
+      <section className="risk-monitor panel" id="risk-monitor">
+        <div className="panel-heading">
+          <div>
+            <p className="eyebrow">Risk through time</p>
+            <h2>Portfolio and component VaR monitor</h2>
+          </div>
+          <div className="risk-monitor-controls">
+            <button
+              className={riskMonitorMode === "backcast" ? "active" : ""}
+              onClick={() => setRiskMonitorMode("backcast")}
+            >
+              Current portfolio · 30 days
+            </button>
+            <button
+              className={riskMonitorMode === "actual" ? "active" : ""}
+              onClick={() => setRiskMonitorMode("actual")}
+            >
+              Actual portfolio history
+            </button>
+            <span className="model-pill">{monitorStatus}</span>
+          </div>
+        </div>
+        {monitorPoints && monitorPoints.length > 1 && latestRiskTrend ? (
+          <div className="risk-monitor-grid">
+            <div>
+              <RiskTrendChart points={monitorPoints} />
+              <div className="plot-legend risk-trend-legend">
+                <span><i className="legend-line risk-trend-var-key" />Dollar VaR</span>
+                <span><i className="legend-line risk-trend-percent-key" />VaR / gross market value</span>
+              </div>
+              <p className="risk-monitor-note">
+                {riskMonitorMode === "backcast"
+                  ? `Today's quantities revalued over ${monitorPoints.length} prior trading days using only data available through each date. Option deltas are held at current values.`
+                  : `Daily closing observations for the current portfolio configuration from comparable ${MODEL_COPY[model].label.toLowerCase()} audit runs at ${percent.format(confidence)} confidence and a ${horizon}-day horizon.`}
+              </p>
+              {riskMonitorMode === "backcast" &&
+                monitorPoints.every((point) => typeof point.portfolioBeta === "number") && (
+                  <div className="beta-trend-section">
+                    <div className="beta-trend-heading">
+                      <div>
+                        <p className="eyebrow">Systematic market sensitivity</p>
+                        <h3>Portfolio beta · 30 days</h3>
+                      </div>
+                      <strong>{latestRiskTrend.portfolioBeta?.toFixed(2)}</strong>
+                    </div>
+                    <PortfolioBetaChart points={monitorPoints} />
+                    <div className="plot-legend risk-trend-legend">
+                      <span><i className="legend-line beta-trend-key" />Portfolio beta vs. SPY</span>
+                      <span><i className="legend-line beta-reference-key" />Market beta 1.0</span>
+                    </div>
+                  </div>
+                )}
+            </div>
+            <div className="risk-change-list">
+              <h3>Latest component changes</h3>
+              {latestRiskTrend.contributions.slice(0, 8).map((item) => {
+                const increasing = (item.change ?? 0) > 0;
+                return (
+                  <article key={item.symbol}>
+                    <div>
+                      <strong>{item.symbol}</strong>
+                      <small>{money.format(item.amount)} · {percent.format(item.share)}</small>
+                    </div>
+                    <b className={increasing ? "risk-change-up" : "risk-change-down"}>
+                      {item.change === null
+                        ? "New"
+                        : `${increasing ? "+" : ""}${money.format(item.change)}`}
+                    </b>
+                  </article>
+                );
+              })}
+            </div>
+          </div>
+        ) : (
+          <p className="risk-monitor-empty">
+            {monitorStatus} {riskMonitorMode === "actual"
+              ? "Keep the Python service running and calculate the same model, confidence, and horizon over time to build the monitoring series."
+              : "The backcast needs at least 252 synchronized prior trading observations for every current position."}
+          </p>
+        )}
       </section>
 
       <section className="frontier panel" id="frontier">
@@ -1010,6 +1910,13 @@ export function RiskWorkbench() {
             <h2>Positions & sensitivities</h2>
           </div>
           <div className="portfolio-history">
+            <button
+              className="secondary refresh-positions"
+              disabled={positionsRefreshing || !rateModelLoaded}
+              onClick={() => void refreshPositionMarketData()}
+            >
+              {positionsRefreshing ? "Refreshing…" : "Refresh prices & risk"}
+            </button>
             <select
               aria-label="Position source files"
               value={selectedVersionId}
@@ -1035,6 +1942,7 @@ export function RiskWorkbench() {
           </div>
         </div>
         {importStatus ? <p className="portfolio-import-status" role="status">{importStatus}</p> : null}
+        <p className="position-market-status" role="status">{historyStatus}</p>
         <p className="portfolio-save-status" role="status">{portfolioSaveStatus}</p>
         <div className="table-wrap">
           <table>
@@ -1047,13 +1955,13 @@ export function RiskWorkbench() {
                 <th aria-sort={positionSort?.field === "quantity" ? `${positionSort.direction}ending` : "none"}>{sortLabel("Quantity", "quantity")}</th>
                 <th aria-sort={positionSort?.field === "price" ? `${positionSort.direction}ending` : "none"}>{sortLabel("Unit price", "price")}</th>
                 <th aria-sort={positionSort?.field === "marketPrice" ? `${positionSort.direction}ending` : "none"}>{sortLabel("Market price", "marketPrice")}</th>
-                <th aria-sort={positionSort?.field === "multiplier" ? `${positionSort.direction}ending` : "none"}>{sortLabel("Multiplier", "multiplier")}</th>
+                <th>30D range</th>
                 <th aria-sort={positionSort?.field === "marketValue" ? `${positionSort.direction}ending` : "none"}>{sortLabel("Market value", "marketValue")}</th>
                 <th aria-sort={positionSort?.field === "volatility" ? `${positionSort.direction}ending` : "none"}>{sortLabel("Annual vol.", "volatility")}</th>
                 <th aria-sort={positionSort?.field === "beta" ? `${positionSort.direction}ending` : "none"}>{sortLabel("Beta", "beta")}</th>
                 <th aria-sort={positionSort?.field === "delta" ? `${positionSort.direction}ending` : "none"}>{sortLabel("Delta", "delta")}</th>
                 <th aria-sort={positionSort?.field === "riskSource" ? `${positionSort.direction}ending` : "none"}>{sortLabel("Risk source", "riskSource")}</th>
-                <th aria-label="Actions" />
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -1069,10 +1977,10 @@ export function RiskWorkbench() {
                 <td><input aria-label="New position quantity" placeholder="0" type="number" value={positionDraft.quantity} onChange={(event) => setPositionDraft({ ...positionDraft, quantity: event.target.value })} /></td>
                 <td><input aria-label="New position unit price" placeholder="0.00" type="number" min="0" step="0.01" value={positionDraft.price} onChange={(event) => setPositionDraft({ ...positionDraft, price: event.target.value })} /></td>
                 <td><span className="market-quote market-quote-empty">After add</span></td>
-                <td><input aria-label="New position multiplier" type="number" min="0" step="1" value={positionDraft.multiplier} onChange={(event) => setPositionDraft({ ...positionDraft, multiplier: event.target.value })} /></td>
+                <td className="position-trend"><span className="market-sparkline-empty">After add</span></td>
                 <td><input aria-label="New position market value" type="number" readOnly value={
                   positionDraft.quantity && positionDraft.price
-                    ? Math.abs(Number(positionDraft.quantity) * Number(positionDraft.price) * (Number(positionDraft.multiplier) || 1))
+                    ? Math.abs(Number(positionDraft.quantity) * Number(positionDraft.price) * (positionDraft.type.endsWith("Option") ? 100 : 1))
                     : ""
                 } /></td>
                 <td><input aria-label="New position volatility" placeholder="Auto" type="number" min="0" step="0.01" value={positionDraft.volatility} onChange={(event) => setPositionDraft({ ...positionDraft, volatility: event.target.value })} /></td>
@@ -1126,22 +2034,28 @@ export function RiskWorkbench() {
                         <strong>{new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 4 }).format(position.marketPrice)}</strong>
                         <em>{
                           position.marketPriceSource === "black-scholes"
-                            ? "Black–Scholes fallback"
+                            ? `Black–Scholes · ${position.marketPriceModel ?? "rate model"} · ${
+                                position.marketPriceRate !== undefined
+                                  ? `${(position.marketPriceRate * 100).toFixed(3)}% zero / ${Math.round((position.marketPriceRateTenor ?? 0) * 365.25)}d`
+                                  : "rate unavailable"
+                              }`
                             : position.marketPriceSource === "hull-white"
-                              ? `${rateCalibration?.model ?? "Rate model"} option`
+                              ? `Priced with ${position.marketPriceModel ?? rateCalibration?.model ?? "rate model"}`
                             : position.marketPriceSource === "treasury-curve"
-                              ? `${rateCalibration?.model ?? "Rate model"} curve`
+                              ? `Priced with ${position.marketPriceModel ?? rateCalibration?.model ?? "rate model"} curve`
                               : "Market quote"
                         }</em>
                         <small>{position.marketPriceAt
-                          ? new Date(position.marketPriceAt).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })
+                          ? formatMarketPriceTimestamp(position.marketPriceAt)
                           : "Latest available"}</small>
                       </span>
                     ) : (
                       <span className="market-quote market-quote-empty">Unavailable</span>
                     )}
                   </td>
-                  <td><input aria-label={`${position.symbol} multiplier`} type="number" min="0" step="1" value={position.multiplier} onChange={(e) => updatePosition(position.id, "multiplier", e.target.value)} /></td>
+                  <td className="position-trend">
+                    <MarketSparkline values={positionTrends.get(position.symbol.toUpperCase()) ?? []} />
+                  </td>
                   <td><input aria-label={`${position.symbol} market value`} type="number" value={position.marketValue} readOnly /></td>
                   <td><input aria-label={`${position.symbol} volatility`} type="number" min="0" step="0.01" value={position.volatility} onChange={(e) => updatePosition(position.id, "volatility", e.target.value)} /></td>
                   <td><input aria-label={`${position.symbol} beta`} type="number" step="0.1" value={position.beta} onChange={(e) => updatePosition(position.id, "beta", e.target.value)} /></td>
@@ -1164,7 +2078,27 @@ export function RiskWorkbench() {
                       {position.riskSource ? riskSourceLabels[position.riskSource] : "Sample"}
                     </span>
                   </td>
-                  <td><button className="remove" aria-label={`Remove ${position.symbol}`} onClick={() => setPositions((current) => current.filter((item) => item.id !== position.id))}>×</button></td>
+                  <td>
+                    <div className="position-actions">
+                      <button
+                        className="position-news"
+                        type="button"
+                        aria-label={`News for ${position.symbol}`}
+                        title={`Search news for ${position.symbol}`}
+                        onClick={(event) => openAssetNews(event, position.symbol)}
+                      >
+                        News
+                      </button>
+                      <button
+                        className="remove"
+                        type="button"
+                        aria-label={`Remove ${position.symbol}`}
+                        onClick={() => setPositions((current) => current.filter((item) => item.id !== position.id))}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -1176,14 +2110,17 @@ export function RiskWorkbench() {
           {" "}
           CSV columns: symbol, type, quantity, price, multiplier, marketValue,
           volatility, beta, delta. Market value is quantity × unit price ×
-          multiplier; option contracts use 100. Sample prices and option
+          multiplier. Multipliers are retained internally and option contracts
+          entered manually use 100. The 30D range curves use adjusted closing
+          prices from the historical-data feed. Sample prices and option
           premiums remain illustrative when no exact tradable identifier is available.
           Stock, ETF, and mutual-fund prices refresh from the latest market feed.
           Stock and ETF options without quotes use a labeled Black–Scholes fallback;
           simplified option symbols assume 90 days to expiration.
           Generic Treasury rows use the selected stored interest-rate model’s initial discount curve;
           mean reversion and volatility are retained for rate scenarios and
-          fixed-income option pricing.
+          fixed-income option pricing. Rate-sensitive model prices are labeled
+          “Priced with” followed by the exact model used.
           Delta is 1.0 for cash instruments.
           Risk source identifies calculated, supplied, fallback, and sample values.
         </p>

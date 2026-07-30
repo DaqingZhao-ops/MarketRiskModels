@@ -48,6 +48,24 @@ def _daily_volatility(positions: Sequence[Position]) -> float:
     return float(np.sqrt(max(variance, 0)))
 
 
+def _component_risk_shares(positions: Sequence[Position]) -> np.ndarray:
+    """Euler allocation of portfolio volatility to signed position exposures."""
+    exposures = np.array(
+        [
+            _directional_exposure(position)
+            * position.volatility
+            / np.sqrt(TRADING_DAYS)
+            for position in positions
+        ],
+    )
+    covariance_exposure = _correlation_matrix(positions) @ exposures
+    variance_contributions = exposures * covariance_exposure
+    total_variance = float(variance_contributions.sum())
+    if total_variance <= 0:
+        return np.zeros(len(positions))
+    return variance_contributions / total_variance
+
+
 def _monte_carlo_losses(positions: Sequence[Position], horizon: int) -> np.ndarray:
     rng = np.random.default_rng(20_260_718 + len(positions) * 101)
     cholesky = np.linalg.cholesky(_correlation_matrix(positions))
@@ -109,6 +127,7 @@ def calculate_risk(
     positions = request.positions
     market_value = sum(abs(position.market_value) for position in positions) or 1.0
     daily_volatility = _daily_volatility(positions)
+    modeled_daily_volatility = daily_volatility
     history_dates: list[str] = []
 
     if request.model == ModelKind.HISTORICAL:
@@ -141,6 +160,22 @@ def calculate_risk(
         expected_shortfall = float(tail.mean()) if tail.size else 0.0
         observations = int(losses.size)
 
+    var_floor = None
+    var_floor_applied = False
+    if request.model == ModelKind.HISTORICAL:
+        floor_volatility = daily_volatility or modeled_daily_volatility
+        z_score = NormalDist().inv_cdf(request.confidence)
+        var_floor = z_score * floor_volatility * np.sqrt(request.horizon)
+        if value_at_risk <= 0 < var_floor:
+            value_at_risk = var_floor
+            expected_shortfall = (
+                floor_volatility
+                * np.sqrt(request.horizon)
+                * NormalDist().pdf(z_score)
+                / (1 - request.confidence)
+            )
+            var_floor_applied = True
+
     z_score = NormalDist().inv_cdf(request.confidence)
     standalone = sum(
         abs(position.market_value * position.delta)
@@ -150,26 +185,23 @@ def calculate_risk(
         * np.sqrt(request.horizon)
         for position in positions
     )
-    raw_amounts = [
-        abs(
-            position.market_value
-            * position.delta
-            * position.volatility
-            * (0.35 + abs(position.beta)),
-        )
-        for position in positions
-    ]
-    contribution_total = sum(raw_amounts) or 1.0
+    contribution_shares = _component_risk_shares(positions)
+    contribution_amounts = contribution_shares * value_at_risk
     contributions = sorted(
         [
             Contribution(
                 **position.model_dump(),
                 amount=amount,
-                share=amount / contribution_total,
+                share=share,
             )
-            for position, amount in zip(positions, raw_amounts, strict=True)
+            for position, amount, share in zip(
+                positions,
+                contribution_amounts,
+                contribution_shares,
+                strict=True,
+            )
         ],
-        key=lambda item: item.share,
+        key=lambda item: item.amount,
         reverse=True,
     )
     maximum_loss = max(
@@ -191,4 +223,6 @@ def calculate_risk(
         contributions=contributions,
         history_start=history_dates[0] if history_dates else None,
         history_end=history_dates[-1] if history_dates else None,
+        var_floor=var_floor,
+        var_floor_applied=var_floor_applied,
     )

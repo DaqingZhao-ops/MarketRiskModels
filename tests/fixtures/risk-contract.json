@@ -1,0 +1,71 @@
+{
+  "positions": [
+    {
+      "id": "long-stock",
+      "symbol": "AAA",
+      "type": "Stock",
+      "quantity": 100,
+      "price": 100,
+      "multiplier": 1,
+      "marketValue": 10000,
+      "volatility": 0.24,
+      "beta": 1.1,
+      "delta": 1
+    },
+    {
+      "id": "short-stock",
+      "symbol": "BBB",
+      "type": "Stock",
+      "quantity": -50,
+      "price": 80,
+      "multiplier": 1,
+      "marketValue": 4000,
+      "volatility": 0.31,
+      "beta": 0.8,
+      "delta": 1
+    },
+    {
+      "id": "long-put",
+      "symbol": "CCC",
+      "type": "Stock Option",
+      "quantity": 10,
+      "price": 5,
+      "multiplier": 100,
+      "marketValue": 5000,
+      "volatility": 0.42,
+      "beta": 1.25,
+      "delta": -0.35
+    }
+  ],
+  "history": {
+    "source": "contract-fixture",
+    "fetchedAt": "2026-01-15T00:00:00Z",
+    "mappings": {
+      "AAA": "AAA",
+      "BBB": "BBB",
+      "CCC": "CCC"
+    },
+    "series": [
+      {
+        "symbol": "AAA",
+        "sourceSymbol": "AAA",
+        "dates": ["2026-01-02", "2026-01-05", "2026-01-06", "2026-01-07", "2026-01-08", "2026-01-09", "2026-01-12", "2026-01-13", "2026-01-14", "2026-01-15"],
+        "adjustedClose": [100, 101, 99, 102, 100, 104, 103, 106, 105, 108]
+      },
+      {
+        "symbol": "BBB",
+        "sourceSymbol": "BBB",
+        "dates": ["2026-01-02", "2026-01-05", "2026-01-06", "2026-01-07", "2026-01-08", "2026-01-09", "2026-01-12", "2026-01-13", "2026-01-14", "2026-01-15"],
+        "adjustedClose": [80, 79, 81, 78, 82, 80, 83, 81, 84, 82]
+      },
+      {
+        "symbol": "CCC",
+        "sourceSymbol": "CCC",
+        "dates": ["2026-01-02", "2026-01-05", "2026-01-06", "2026-01-07", "2026-01-08", "2026-01-09", "2026-01-12", "2026-01-13", "2026-01-14", "2026-01-15"],
+        "adjustedClose": [50, 49, 51, 48, 52, 47, 53, 46, 54, 45]
+      }
+    ]
+  },
+  "confidence": 0.95,
+  "horizon": 1
+}

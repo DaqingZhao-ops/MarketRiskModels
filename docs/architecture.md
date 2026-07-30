@@ -37,6 +37,7 @@ The TypeScript application owns:
 - Model controls
 - Interactive tables and charts
 - Display formatting
+- Historical portfolio alpha/beta calculation
 - Routing requests to the Python service
 - A clearly identified continuity calculation path
 
@@ -50,6 +51,10 @@ contains:
   adjusted close, source, and retrieval time
 - `risk_runs`: model, confidence, horizon, complete request and result
   snapshots, engine version, and creation time
+
+The risk-history endpoint reads these immutable snapshots to provide comparable
+portfolio VaR, normalized VaR, Expected Shortfall, and additive component-VaR
+trends. See [Risk Monitoring Methodology](risk-monitoring-methodology.md).
 
 Timestamps are UTC. Constraints and indexes are defined in SQLAlchemy and the
 Alembic migration.
@@ -77,5 +82,13 @@ presented as Python-backed when the Python service is unavailable.
 4. Set `PYTHON_RISK_API_URL` in the web deployment.
 5. Add authentication between the web proxy and Python API.
 6. Add market-data licensing controls, retries, quality checks, and provenance.
-7. Reconcile Python and continuity-engine results in automated contract tests.
+7. Extend the cross-engine contract fixture when new shared risk outputs are added.
 
+## Cross-engine contract
+
+The Python test suite runs the TypeScript continuity engine against the shared
+`tests/fixtures/risk-contract.json` portfolio. Parametric and historical
+results must match at numerical precision; Monte Carlo VaR and expected
+shortfall must remain within a statistical tolerance because the engines use
+different deterministic random-number generators. Portfolio alpha/beta is not
+part of this contract because it is currently owned only by TypeScript.
