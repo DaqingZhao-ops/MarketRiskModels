@@ -9,7 +9,7 @@ MACOS="$CONTENTS/MacOS"
 RESOURCES="$CONTENTS/Resources"
 NODE_BIN="$(dirname "$(command -v node)")"
 
-NEXT_PUBLIC_RISK_API_URL=http://127.0.0.1:8000 npm run build
+npm run build
 cd "$ROOT/backend"
 .venv/bin/alembic upgrade head
 
