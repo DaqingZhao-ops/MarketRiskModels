@@ -1,5 +1,5 @@
 import asyncio
-from datetime import date
+from datetime import date, datetime, timezone
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
@@ -25,10 +25,13 @@ def test_load_series_persists_reuses_cache_and_honors_force_refresh(monkeypatch)
         nonlocal calls
         calls += 1
         return (
-            [
-                (date(2026, 7, 17), 699.50),
-                (date(2026, 7, 18), 701.25),
-            ],
+            market_data.FetchedSeries(
+                [
+                    (date(2026, 7, 17), 699.50),
+                    (date(2026, 7, 18), 701.25),
+                ],
+                datetime(2026, 7, 18, 20, 0, tzinfo=timezone.utc),
+            ),
             market_data.YFINANCE_SOURCE,
         )
 
@@ -51,6 +54,8 @@ def test_load_series_persists_reuses_cache_and_honors_force_refresh(monkeypatch)
         assert [row.adjusted_close for row in first] == [699.50, 701.25]
         assert [row.adjusted_close for row in second] == [699.50, 701.25]
         assert [row.adjusted_close for row in refreshed] == [699.50, 701.25]
+        assert refreshed[-1].observed_at == datetime(2026, 7, 18, 20, 0)
+        assert refreshed[0].observed_at is None
         assert all(row.source == market_data.YFINANCE_SOURCE for row in refreshed)
         assert calls == 2
     engine.dispose()
@@ -63,7 +68,10 @@ def test_polygon_cache_does_not_block_yfinance_retry(monkeypatch) -> None:
         nonlocal calls
         calls += 1
         source = market_data.POLYGON_SOURCE if calls == 1 else market_data.YFINANCE_SOURCE
-        return [(date(2026, 7, 17), 699.50), (date(2026, 7, 18), 701.25)], source
+        return market_data.FetchedSeries([
+            (date(2026, 7, 17), 699.50),
+            (date(2026, 7, 18), 701.25),
+        ]), source
 
     monkeypatch.setattr(market_data, "fetch_market_series", fake_fetch)
     engine = create_engine("sqlite:///:memory:")
@@ -82,15 +90,18 @@ def test_yfinance_failure_falls_back_to_polygon(monkeypatch) -> None:
         raise RuntimeError("provider unavailable")
 
     async def fake_polygon(_: str, __: str):
-        return [(date(2026, 7, 17), 699.50), (date(2026, 7, 18), 701.25)]
+        return market_data.FetchedSeries([
+            (date(2026, 7, 17), 699.50),
+            (date(2026, 7, 18), 701.25),
+        ])
 
     monkeypatch.setattr(market_data, "fetch_yfinance_series", failed_yfinance)
     monkeypatch.setattr(market_data, "fetch_polygon_series", fake_polygon)
-    observations, source = asyncio.run(market_data.fetch_market_series(
+    fetched, source = asyncio.run(market_data.fetch_market_series(
         "SPY",
         Settings(polygon_api_key="test-key"),
     ))
-    assert observations[-1][1] == 701.25
+    assert fetched.observations[-1][1] == 701.25
     assert source == market_data.POLYGON_SOURCE
 
 
@@ -103,6 +114,7 @@ def test_yfinance_uses_supported_period_and_trims_to_requested_years(monkeypatch
     class FakeTicker:
         def __init__(self, symbol: str):
             requested["symbol"] = symbol
+            self.history_metadata = {"regularMarketTime": 1784404800}
 
         def history(self, **kwargs):
             requested.update(kwargs)
@@ -112,7 +124,11 @@ def test_yfinance_uses_supported_period_and_trims_to_requested_years(monkeypatch
             )
 
     monkeypatch.setattr(yfinance, "Ticker", FakeTicker)
-    observations = market_data._fetch_yfinance_series_sync("spy", years=4)
+    fetched = market_data._fetch_yfinance_series_sync("spy", years=4)
     assert requested["symbol"] == "SPY"
     assert requested["period"] == "5y"
-    assert observations[-1] == (date(2026, 7, 18), 101.0)
+    assert fetched.observations[-1] == (date(2026, 7, 18), 101.0)
+    assert fetched.latest_price_at == datetime.fromtimestamp(
+        1784404800,
+        tz=timezone.utc,
+    )
