@@ -76,6 +76,15 @@ test("server-renders the market risk workbench", async () => {
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton/i);
 });
 
+test("links populated 30-day asset trends to Yahoo Finance charts", async () => {
+  const source = await readFile(
+    new URL("../app/risk-workbench.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(source, /finance\.yahoo\.com\/quote\/.*\/chart\//);
+  assert.match(source, /Open Yahoo Finance chart for/);
+});
+
 test("includes all supported instrument classes", async () => {
   const response = await render();
   const html = await response.text();

@@ -183,6 +183,16 @@ function openAssetNews(event: MouseEvent<HTMLButtonElement>, symbol: string) {
   openPopupWindow(`https://news.google.com/search?q=${query}`, "asset-news-search");
 }
 
+function openYahooQuote(event: MouseEvent<HTMLButtonElement>, symbol: string) {
+  event.stopPropagation();
+  const ticker = symbol.trim().split(/\s+/)[0] || symbol.trim();
+  const yahooTicker = ticker.replace(".", "-");
+  openPopupWindow(
+    `https://finance.yahoo.com/quote/${encodeURIComponent(yahooTicker)}/chart/`,
+    `yahoo-finance-quote-${yahooTicker.replace(/[^a-z0-9]/gi, "-")}`,
+  );
+}
+
 function openMarketIndexNews(label: string) {
   const query = encodeURIComponent(`${label} index financial news`);
   openPopupWindow(`https://news.google.com/search?q=${query}`, "market-index-news-search");
@@ -218,7 +228,7 @@ function formatMarketPriceTimestamp(value: string) {
   });
 }
 
-function MarketSparkline({ values }: { values: number[] }) {
+function MarketSparkline({ values, symbol }: { values: number[]; symbol?: string }) {
   if (values.length < 2) return <span className="market-sparkline-empty">Trend unavailable</span>;
   const width = 92;
   const height = 32;
@@ -231,7 +241,7 @@ function MarketSparkline({ values }: { values: number[] }) {
     return `${x.toFixed(2)},${y.toFixed(2)}`;
   }).join(" ");
   const rising = values.at(-1)! >= values[0];
-  return (
+  const chart = (
     <svg
       className={`market-sparkline ${rising ? "market-sparkline-up" : "market-sparkline-down"}`}
       viewBox={`0 0 ${width} ${height}`}
@@ -240,6 +250,18 @@ function MarketSparkline({ values }: { values: number[] }) {
     >
       <polyline points={points} fill="none" vectorEffect="non-scaling-stroke" />
     </svg>
+  );
+  if (!symbol) return chart;
+  return (
+    <button
+      className="position-trend-link"
+      type="button"
+      aria-label={`Open Yahoo Finance chart for ${symbol}`}
+      title={`Open ${symbol} chart on Yahoo Finance`}
+      onClick={(event) => openYahooQuote(event, symbol)}
+    >
+      {chart}
+    </button>
   );
 }
 
@@ -2054,7 +2076,10 @@ export function RiskWorkbench() {
                     )}
                   </td>
                   <td className="position-trend">
-                    <MarketSparkline values={positionTrends.get(position.symbol.toUpperCase()) ?? []} />
+                    <MarketSparkline
+                      values={positionTrends.get(position.symbol.toUpperCase()) ?? []}
+                      symbol={position.symbol}
+                    />
                   </td>
                   <td><input aria-label={`${position.symbol} market value`} type="number" value={position.marketValue} readOnly /></td>
                   <td><input aria-label={`${position.symbol} volatility`} type="number" min="0" step="0.01" value={position.volatility} onChange={(e) => updatePosition(position.id, "volatility", e.target.value)} /></td>
