@@ -247,14 +247,15 @@ test("uses a labeled Black-Scholes fallback for simplified stock options", () =>
       { symbol: "SPY", sourceSymbol: "SPY", dates, adjustedClose: adjustedClose.map((price) => price * 2) },
     ],
   }, new Date("2026-03-02T00:00:00Z"), optionRateCalibration);
-  assert.equal(enriched.marketPriceSource, "black-scholes");
+  assert.equal(enriched.modelPriceSource, "black-scholes");
   assert.equal(enriched.marketPriceModel, "Hull-White 1F");
   assert.ok(Math.abs(enriched.marketPriceRate - -Math.log(
     hullWhiteDiscountFactor(optionRateCalibration, 90 / 365.25),
   ) / (90 / 365.25)) < 1e-12);
   assert.equal(enriched.marketPriceRateTenor, 90 / 365.25);
-  assert.ok(enriched.marketPrice > 0);
-  assert.equal(enriched.price, enriched.marketPrice);
+  assert.equal(enriched.marketPrice, undefined);
+  assert.ok(enriched.modelPrice > 0);
+  assert.equal(enriched.price, enriched.modelPrice);
   assert.ok(enriched.delta > 0 && enriched.delta < 1);
   const [repriced] = enrichPositionsWithHistoricalRisk(
     [enriched],
@@ -301,9 +302,54 @@ test("uses the Black-Scholes fallback for SPY ETF options", () => {
       { symbol: "SPY", sourceSymbol: "SPY", dates, adjustedClose, latestPrice: 625 },
     ],
   }, new Date("2026-03-02T00:00:00Z"), optionRateCalibration);
-  assert.equal(enriched.marketPriceSource, "black-scholes");
-  assert.ok(enriched.marketPrice > 0);
+  assert.equal(enriched.modelPriceSource, "black-scholes");
+  assert.ok(enriched.modelPrice > 0);
   assert.ok(enriched.delta < 0 && enriched.delta > -1);
+});
+
+test("keeps an OCC option market quote separate from its model price", () => {
+  const dates = Array.from({ length: 61 }, (_, index) =>
+    new Date(Date.UTC(2026, 0, index + 1)).toISOString().slice(0, 10));
+  const adjustedClose = dates.map((_, index) =>
+    700 * (1 + index * 0.0007 + Math.sin(index) * 0.008));
+  const [enriched] = enrichPositionsWithHistoricalRisk([{
+    id: "spy-call",
+    symbol: "SPY260918C00740000",
+    type: "ETF Option",
+    quantity: 1,
+    price: 10,
+    multiplier: 100,
+    marketValue: 1000,
+    volatility: 0.2,
+    beta: 1,
+    delta: 0.5,
+    riskSource: "historical-pending",
+  }], {
+    source: "test",
+    fetchedAt: "2026-07-30T19:00:00Z",
+    mappings: { SPY260918C00740000: "SPY", SPY: "SPY" },
+    series: [
+      {
+        symbol: "SPY260918C00740000",
+        sourceSymbol: "SPY",
+        dates,
+        adjustedClose,
+        latestPrice: 730,
+        optionQuote: {
+          price: 19.28,
+          observedAt: "2026-07-30T19:00:00Z",
+          source: "Yahoo Finance option trade",
+        },
+      },
+      { symbol: "SPY", sourceSymbol: "SPY", dates, adjustedClose, latestPrice: 730 },
+    ],
+  }, new Date("2026-07-30T19:00:00Z"), optionRateCalibration);
+  assert.equal(enriched.marketPrice, 19.28);
+  assert.equal(enriched.marketPriceSource, "market");
+  assert.equal(enriched.price, 19.28);
+  assert.ok(enriched.modelPrice > 0);
+  assert.equal(enriched.modelPriceSource, "black-scholes");
+  assert.notEqual(enriched.marketPrice, enriched.modelPrice);
 });
 
 test("uses the official Treasury curve as a labeled generic bond fallback", () => {
@@ -336,10 +382,10 @@ test("uses the official Treasury curve as a labeled generic bond fallback", () =
       yields: { UST2Y: 0.04, UST5Y: 0.041, UST10Y: 0.043, UST20Y: 0.048 },
     },
   });
-  assert.equal(enriched.marketPriceSource, "treasury-curve");
-  assert.ok(enriched.marketPrice > 0 && enriched.marketPrice < 1);
-  assert.equal(enriched.marketPriceAt, "2026-07-17T00:00:00Z");
-  assert.equal(enriched.price, enriched.marketPrice);
+  assert.equal(enriched.modelPriceSource, "treasury-curve");
+  assert.equal(enriched.marketPrice, undefined);
+  assert.ok(enriched.modelPrice > 0 && enriched.modelPrice < 1);
+  assert.equal(enriched.price, enriched.modelPrice);
 });
 
 test("builds an efficient frontier and locates the current portfolio", () => {
@@ -693,6 +739,6 @@ test("reprices an existing bond option when the selected rate model changes", ()
   );
   assert.equal(hullWhitePosition.marketPriceModel, "Hull-White 1F");
   assert.equal(g2Position.marketPriceModel, "G2++ 2F");
-  assert.notEqual(g2Position.marketPrice, hullWhitePosition.marketPrice);
+  assert.notEqual(g2Position.modelPrice, hullWhitePosition.modelPrice);
   assert.equal(g2Position.riskSource, "historical");
 });

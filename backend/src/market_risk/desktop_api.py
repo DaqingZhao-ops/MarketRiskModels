@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 
 from .config import Settings, get_settings
 from .database import get_session
-from .market_data import load_series
+from .market_data import fetch_yfinance_option_quote, load_series
 from .models import PortfolioVersion, RateCalibration
 
 router = APIRouter(prefix="/api/v1")
@@ -321,6 +321,11 @@ async def market_history(
             continue
         if not records:
             continue
+        option_quote = None
+        try:
+            option_quote = await fetch_yfinance_option_quote(symbol)
+        except Exception:
+            pass
         series.append({
             "symbol": symbol,
             "sourceSymbol": records[-1].source_symbol,
@@ -335,6 +340,7 @@ async def market_history(
             "retrievedAt": records[-1].retrieved_at.isoformat(),
             "currency": "USD",
             "provider": records[-1].source,
+            "optionQuote": option_quote,
         })
     if not series:
         raise HTTPException(status_code=502, detail="No price history was returned.")

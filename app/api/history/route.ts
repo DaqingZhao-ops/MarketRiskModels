@@ -76,7 +76,46 @@ type MarketSeries = {
   latestPriceAt?: string;
   currency: string;
   source: string;
+  optionQuote?: {
+    price: number;
+    observedAt: string;
+    source: string;
+  };
 };
+
+function isOccOption(symbol: string) {
+  return /^[A-Z]{1,6}\d{6}[CP]\d{8}$/.test(symbol.trim().toUpperCase());
+}
+
+async function fetchYahooOptionQuote(symbol: string, forceRefresh = false) {
+  const contract = symbol.trim().toUpperCase();
+  const url = new URL(
+    `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(contract)}`,
+  );
+  url.searchParams.set("range", "5d");
+  url.searchParams.set("interval", "1m");
+  const response = await fetch(url, {
+    headers: { "User-Agent": "Mozilla/5.0 MarketRiskModels/1.0" },
+    ...(forceRefresh ? { cache: "no-store" as const } : { next: { revalidate: 60 } }),
+  });
+  if (!response.ok) throw new Error(`${contract}: option quote request failed (${response.status})`);
+  const payload = await response.json() as YahooChart;
+  const result = payload.chart?.result?.[0];
+  const closes = result?.indicators?.quote?.[0]?.close ?? [];
+  const price = result?.meta?.regularMarketPrice ??
+    [...closes].reverse().find((value): value is number =>
+      typeof value === "number" && Number.isFinite(value) && value >= 0);
+  if (typeof price !== "number") throw new Error(`${contract}: no option market price returned`);
+  const timestamp = result?.meta?.regularMarketTime ??
+    result?.timestamp?.at(-1);
+  return {
+    price,
+    observedAt: timestamp
+      ? new Date(timestamp * 1000).toISOString()
+      : new Date().toISOString(),
+    source: "Yahoo Finance option trade",
+  };
+}
 
 async function fetchYahooSeries(
   symbol: string,
@@ -204,14 +243,25 @@ async function fetchSeries(
   period2: number,
   forceRefresh = false,
 ) {
+  let series: MarketSeries;
   try {
-    return await fetchYahooSeries(symbol, period1, period2, forceRefresh);
+    series = await fetchYahooSeries(symbol, period1, period2, forceRefresh);
   } catch {
     const polygonApiKey = process.env.POLYGON_API_KEY?.trim();
     if (polygonApiKey) {
-      return fetchPolygonSeries(symbol, period1, period2, polygonApiKey, forceRefresh);
+      series = await fetchPolygonSeries(symbol, period1, period2, polygonApiKey, forceRefresh);
+    } else {
+      throw new Error(`${sourceSymbol(symbol)}: all configured market-data providers failed`);
     }
-    throw new Error(`${sourceSymbol(symbol)}: all configured market-data providers failed`);
+  }
+  if (!isOccOption(symbol)) return series;
+  try {
+    return {
+      ...series,
+      optionQuote: await fetchYahooOptionQuote(symbol, forceRefresh),
+    };
+  } catch {
+    return series;
   }
 }
 

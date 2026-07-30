@@ -1,4 +1,5 @@
 import asyncio
+import re
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
@@ -30,9 +31,48 @@ def source_symbol(symbol: str) -> str:
     normalized = symbol.strip().upper()
     if normalized in PROXIES:
         return PROXIES[normalized]
+    occ_option = re.match(r"^([A-Z]{1,6})\d{6}[CP]\d{8}$", normalized)
+    if occ_option:
+        return occ_option.group(1)
     if " " in normalized:
         return normalized.split(" ", maxsplit=1)[0]
     return normalized
+
+
+def _fetch_yfinance_option_quote_sync(symbol: str) -> dict[str, Any] | None:
+    import yfinance as yf
+
+    normalized = symbol.strip().upper()
+    if not re.match(r"^[A-Z]{1,6}\d{6}[CP]\d{8}$", normalized):
+        return None
+    ticker = yf.Ticker(normalized)
+    history = ticker.history(
+        period="5d",
+        interval="1d",
+        auto_adjust=False,
+        actions=False,
+        repair=False,
+        timeout=20,
+    )
+    closes = history.get("Close", [])
+    if closes.empty:
+        return None
+    price = float(closes.iloc[-1])
+    quote_timestamp = ticker.history_metadata.get("regularMarketTime")
+    observed_at = (
+        datetime.fromtimestamp(quote_timestamp, tz=timezone.utc)
+        if isinstance(quote_timestamp, (int, float))
+        else datetime.now(timezone.utc)
+    )
+    return {
+        "price": price,
+        "observedAt": observed_at.isoformat(),
+        "source": "Yahoo Finance option trade",
+    }
+
+
+async def fetch_yfinance_option_quote(symbol: str) -> dict[str, Any] | None:
+    return await asyncio.to_thread(_fetch_yfinance_option_quote_sync, symbol)
 
 
 async def fetch_polygon_series(
@@ -174,6 +214,11 @@ def is_fresh(session: Session, symbol: str, cache_hours: int) -> bool:
     # A cached backup-provider result must not prevent the preferred provider
     # from being retried after provider priority or entitlements change.
     if newest.source != YFINANCE_SOURCE:
+        return False
+    # OCC option rows cached before contract/underlying separation contain the
+    # option premium as risk-factor history. Refresh them so history tracks the
+    # underlying while the exact contract quote is returned separately.
+    if newest.source_symbol != source_symbol(symbol):
         return False
     # Rows created before provider timestamps were persisted need one refresh
     # so the UI can replace a date-only label with the actual quote time.
