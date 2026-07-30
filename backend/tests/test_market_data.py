@@ -85,6 +85,32 @@ def test_polygon_cache_does_not_block_yfinance_retry(monkeypatch) -> None:
     engine.dispose()
 
 
+def test_timestamp_less_yfinance_cache_is_refreshed(monkeypatch) -> None:
+    calls = 0
+
+    async def fake_fetch(_: str, __: Settings):
+        nonlocal calls
+        calls += 1
+        timestamp = None if calls == 1 else datetime(
+            2026, 7, 18, 19, 45, tzinfo=timezone.utc,
+        )
+        return market_data.FetchedSeries(
+            [(date(2026, 7, 17), 699.50), (date(2026, 7, 18), 701.25)],
+            timestamp,
+        ), market_data.YFINANCE_SOURCE
+
+    monkeypatch.setattr(market_data, "fetch_market_series", fake_fetch)
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    with Session(engine) as session:
+        first = asyncio.run(load_series(session, "SPY", Settings()))
+        second = asyncio.run(load_series(session, "SPY", Settings()))
+        assert first[-1].observed_at is None
+        assert second[-1].observed_at == datetime(2026, 7, 18, 19, 45)
+        assert calls == 2
+    engine.dispose()
+
+
 def test_yfinance_failure_falls_back_to_polygon(monkeypatch) -> None:
     async def failed_yfinance(*_):
         raise RuntimeError("provider unavailable")
