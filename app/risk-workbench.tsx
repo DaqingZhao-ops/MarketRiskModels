@@ -24,13 +24,21 @@ import { apiUrl } from "../lib/api-client";
 const money = new Intl.NumberFormat("en-US", {
   style: "currency",
   currency: "USD",
-  maximumFractionDigits: 0,
+  maximumFractionDigits: 3,
 });
 
 const percent = new Intl.NumberFormat("en-US", {
   style: "percent",
-  maximumFractionDigits: 1,
+  maximumFractionDigits: 3,
 });
+
+const metricNumber = new Intl.NumberFormat("en-US", {
+  maximumFractionDigits: 3,
+});
+
+function roundMetric(value: number) {
+  return Math.round((value + Number.EPSILON) * 1_000) / 1_000;
+}
 
 const riskSourceLabels = {
   provided: "Provided",
@@ -200,12 +208,12 @@ function openMarketIndexNews(label: string) {
 
 function formatMarketIndicatorValue(value: number, unit: MarketIndicatorQuote["unit"]) {
   if (unit === "percent") return `${value.toFixed(3)}%`;
-  if (unit === "fx") return value.toFixed(4);
+  if (unit === "fx") return value.toFixed(3);
   if (unit === "gold") {
-    return `$${value.toLocaleString("en-US", { maximumFractionDigits: 2 })}/oz`;
+    return `$${metricNumber.format(value)}/oz`;
   }
-  if (unit === "oil") return `$${value.toFixed(2)}/bbl`;
-  return value.toLocaleString("en-US", { maximumFractionDigits: 2 });
+  if (unit === "oil") return `$${value.toFixed(3)}/bbl`;
+  return metricNumber.format(value);
 }
 
 function formatMarketPriceTimestamp(value: string) {
@@ -495,7 +503,7 @@ function PortfolioBetaChart({ points }: { points: RiskTrendPoint[] }) {
       {ticks.map((tick) => (
         <g key={tick}>
           <line x1={margin.left} y1={y(tick)} x2={width - margin.right} y2={y(tick)} className="risk-trend-grid" />
-          <text x={margin.left - 10} y={y(tick) + 3} textAnchor="end">{tick.toFixed(2)}</text>
+          <text x={margin.left - 10} y={y(tick) + 3} textAnchor="end">{tick.toFixed(3)}</text>
         </g>
       ))}
       <line x1={margin.left} y1={y(1)} x2={width - margin.right} y2={y(1)} className="beta-reference" />
@@ -943,7 +951,7 @@ export function RiskWorkbench() {
       warnings.push(`The ${rateCalibration.model} calibration uses governed fallback parameters: ${rateCalibration.fallbackReason ?? "Treasury history was unavailable"}.`);
     }
     if (rateCalibration && rateCalibration.fitRmse > 20) {
-      warnings.push(`${rateCalibration.model} curve-factor reconstruction error is ${rateCalibration.fitRmse.toFixed(2)} bp, above the 20 bp review threshold.`);
+      warnings.push(`${rateCalibration.model} curve-factor reconstruction error is ${rateCalibration.fitRmse.toFixed(3)} bp, above the 20 bp review threshold.`);
     }
     if (rateCalibration && rateCalibration.observationCount && rateCalibration.observationCount < 500) {
       warnings.push(`The rate calibration uses only ${rateCalibration.observationCount.toLocaleString()} observations.`);
@@ -1315,7 +1323,7 @@ export function RiskWorkbench() {
                   {indicator.change >= 0 ? "+" : ""}
                   {indicator.unit === "percent"
                     ? `${indicator.change.toFixed(3)} pts`
-                    : `${indicator.change.toFixed(2)} (${percent.format(indicator.percentChange)})`}
+                    : `${indicator.change.toFixed(3)} (${percent.format(indicator.percentChange)})`}
                   {" "}vs previous close
                 </span>
                 <span className="market-previous-close">
@@ -1336,10 +1344,10 @@ export function RiskWorkbench() {
               {indicator.future ? (
                 <div className="market-future">
                   <b>Futures</b>
-                  <span>{indicator.future.value.toLocaleString("en-US", { maximumFractionDigits: 2 })}</span>
+                  <span>{metricNumber.format(indicator.future.value)}</span>
                   <small className={indicator.future.change >= 0 ? "market-up" : "market-down"}>
                     {indicator.future.change >= 0 ? "+" : ""}
-                    {indicator.future.change.toFixed(2)} ({percent.format(indicator.future.percentChange)})
+                    {indicator.future.change.toFixed(3)} ({percent.format(indicator.future.percentChange)})
                   </small>
                   <time dateTime={indicator.future.asOf}>
                     as of {new Date(indicator.future.asOf).toLocaleString([], {
@@ -1439,7 +1447,7 @@ export function RiskWorkbench() {
             </div>
             <div title="Historical portfolio return sensitivity to SPY">
               <span>Portfolio beta</span>
-              <b>{portfolioAlphaBeta ? portfolioAlphaBeta.beta.toFixed(2) : "Loading…"}</b>
+              <b>{portfolioAlphaBeta ? portfolioAlphaBeta.beta.toFixed(3) : "Loading…"}</b>
             </div>
           </div>
           <small>{positions.length} positions · {result.observations.toLocaleString()} scenarios</small>
@@ -1555,7 +1563,7 @@ export function RiskWorkbench() {
               <>
                 <div><dt>Second mean reversion (b)</dt><dd>{(rateCalibration.secondFactorMeanReversion ?? 0).toFixed(3)} /yr</dd></div>
                 <div><dt>Second volatility (η)</dt><dd>{percent.format(rateCalibration.secondFactorVolatility ?? 0)}</dd></div>
-                <div><dt>Factor correlation (ρ)</dt><dd>{(rateCalibration.factorCorrelation ?? 0).toFixed(2)}</dd></div>
+                <div><dt>Factor correlation (ρ)</dt><dd>{(rateCalibration.factorCorrelation ?? 0).toFixed(3)}</dd></div>
               </>
             ) : null}
             <div><dt>Curve nodes</dt><dd>{rateCalibration.curve.length}</dd></div>
@@ -1575,7 +1583,7 @@ export function RiskWorkbench() {
             {rateCalibration.secondFactorMeanReversionConfidenceInterval ? (
               <div><dt>b 95% interval</dt><dd>{rateCalibration.secondFactorMeanReversionConfidenceInterval.map((value) => value.toFixed(3)).join("–")} /yr</dd></div>
             ) : null}
-            <div><dt>Historical fit RMSE</dt><dd>{rateCalibration.fitRmse.toFixed(2)} bp</dd></div>
+            <div><dt>Historical fit RMSE</dt><dd>{rateCalibration.fitRmse.toFixed(3)} bp</dd></div>
             {rateCalibration.fallbackUsed ? (
               <div><dt>Fallback</dt><dd>Yes — {rateCalibration.fallbackReason ?? "historical calibration unavailable"}</dd></div>
             ) : null}
@@ -1620,7 +1628,7 @@ export function RiskWorkbench() {
             <header><span>Interest-rate fit</span><strong className={`fit-${rateFitQuality.toLowerCase()}`}>{rateFitQuality}</strong></header>
             <dl>
               <div><dt>Model</dt><dd>{rateCalibration?.model ?? "Unavailable"}</dd></div>
-              <div><dt>Fit RMSE</dt><dd>{rateCalibration ? `${rateCalibration.fitRmse.toFixed(2)} bp` : "Unavailable"}</dd></div>
+              <div><dt>Fit RMSE</dt><dd>{rateCalibration ? `${rateCalibration.fitRmse.toFixed(3)} bp` : "Unavailable"}</dd></div>
               <div><dt>Observations</dt><dd>{rateCalibration?.observationCount?.toLocaleString() ?? "Unavailable"}</dd></div>
               <div><dt>Window</dt><dd>{rateCalibration?.calibrationWindowStart && rateCalibration.calibrationWindowEnd ? `${rateCalibration.calibrationWindowStart} to ${rateCalibration.calibrationWindowEnd}` : "Unavailable"}</dd></div>
               <div><dt>Method</dt><dd>{rateCalibration?.calibrationObjective ?? "Governed parameters"}</dd></div>
@@ -1785,7 +1793,7 @@ export function RiskWorkbench() {
                         <p className="eyebrow">Systematic market sensitivity</p>
                         <h3>Portfolio beta · 30 days</h3>
                       </div>
-                      <strong>{latestRiskTrend.portfolioBeta?.toFixed(2)}</strong>
+                      <strong>{latestRiskTrend.portfolioBeta?.toFixed(3)}</strong>
                     </div>
                     <PortfolioBetaChart points={monitorPoints} />
                     <div className="plot-legend risk-trend-legend">
@@ -1845,7 +1853,7 @@ export function RiskWorkbench() {
             <div className="frontier-summary">
               <span><b>{percent.format(frontier.current.return)}</b> expected return</span>
               <span><b>{percent.format(frontier.current.risk)}</b> volatility</span>
-              <span><b>{frontier.current.sharpe.toFixed(2)}</b> Sharpe ratio</span>
+              <span><b>{frontier.current.sharpe.toFixed(3)}</b> Sharpe ratio</span>
               <span>{frontier.observations.toLocaleString()} overlapping daily returns</span>
             </div>
             <div className="frontier-candidates">
@@ -1889,7 +1897,7 @@ export function RiskWorkbench() {
                     <div><dt>Turnover</dt><dd>{percent.format(alternative.turnover)}</dd></div>
                     <div><dt>Return</dt><dd>{percent.format(alternative.point.return)}</dd></div>
                     <div><dt>Volatility</dt><dd>{percent.format(alternative.point.risk)}</dd></div>
-                    <div><dt>Sharpe</dt><dd>{alternative.point.sharpe.toFixed(2)}</dd></div>
+                    <div><dt>Sharpe</dt><dd>{alternative.point.sharpe.toFixed(3)}</dd></div>
                   </dl>
                   <ol>
                     {alternative.changes.map((change) => (
@@ -2053,7 +2061,7 @@ export function RiskWorkbench() {
                   <td>
                     {position.marketPrice !== undefined ? (
                       <span className="market-quote">
-                        <strong>{new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 4 }).format(position.marketPrice)}</strong>
+                        <strong>{new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 3 }).format(position.marketPrice)}</strong>
                         <em>{
                           position.marketPriceSource === "black-scholes"
                             ? `Black–Scholes · ${position.marketPriceModel ?? "rate model"} · ${
@@ -2081,10 +2089,10 @@ export function RiskWorkbench() {
                       symbol={position.symbol}
                     />
                   </td>
-                  <td><input aria-label={`${position.symbol} market value`} type="number" value={position.marketValue} readOnly /></td>
-                  <td><input aria-label={`${position.symbol} volatility`} type="number" min="0" step="0.01" value={position.volatility} onChange={(e) => updatePosition(position.id, "volatility", e.target.value)} /></td>
-                  <td><input aria-label={`${position.symbol} beta`} type="number" step="0.1" value={position.beta} onChange={(e) => updatePosition(position.id, "beta", e.target.value)} /></td>
-                  <td><input aria-label={`${position.symbol} delta`} type="number" step="0.05" value={position.delta} onChange={(e) => updatePosition(position.id, "delta", e.target.value)} /></td>
+                  <td><input aria-label={`${position.symbol} market value`} type="number" value={roundMetric(position.marketValue)} readOnly /></td>
+                  <td><input aria-label={`${position.symbol} volatility`} type="number" min="0" step="0.001" value={roundMetric(position.volatility)} onChange={(e) => updatePosition(position.id, "volatility", e.target.value)} /></td>
+                  <td><input aria-label={`${position.symbol} beta`} type="number" step="0.001" value={roundMetric(position.beta)} onChange={(e) => updatePosition(position.id, "beta", e.target.value)} /></td>
+                  <td><input aria-label={`${position.symbol} delta`} type="number" step="0.001" value={roundMetric(position.delta)} onChange={(e) => updatePosition(position.id, "delta", e.target.value)} /></td>
                   <td>
                     <span
                       className={`risk-source risk-source-${position.riskSource ?? "sample"}`}
