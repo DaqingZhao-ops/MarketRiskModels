@@ -385,13 +385,20 @@ export async function GET(request: NextRequest) {
       result.status === "fulfilled" ? [result.value] : []);
     if (!series.length) throw new Error("No price history was returned for the imported positions.");
     const providers = [...new Set(series.map((item) => item.source))];
-    return NextResponse.json({
-      source: providers.join(" with "),
-      fetchedAt: new Date().toISOString(),
-      mappings: Object.fromEntries(series.map((item) => [item.symbol, item.sourceSymbol])),
-      series,
-      treasuryCurve: treasuryResult,
-    });
+    return NextResponse.json(
+      {
+        source: providers.join(" with "),
+        fetchedAt: new Date().toISOString(),
+        mappings: Object.fromEntries(series.map((item) => [item.symbol, item.sourceSymbol])),
+        series,
+        treasuryCurve: treasuryResult,
+      },
+      {
+        headers: {
+          "Cache-Control": "no-store, no-cache, must-revalidate",
+        },
+      },
+    );
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unable to load price history." },

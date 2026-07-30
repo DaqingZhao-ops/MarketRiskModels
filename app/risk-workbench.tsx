@@ -756,7 +756,10 @@ export function RiskWorkbench() {
     try {
       const query = new URLSearchParams({ symbols: symbolsKey });
       if (stockSymbolsKey) query.set("fundamentals", stockSymbolsKey);
-      if (forceRefresh) query.set("refresh", "1");
+      if (forceRefresh) {
+        query.set("refresh", "1");
+        query.set("requestedAt", String(Date.now()));
+      }
       const response = await fetch(apiUrl(`/api/history?${query}`), {
         signal,
         cache: forceRefresh ? "no-store" : "default",
