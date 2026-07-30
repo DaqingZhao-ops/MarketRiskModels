@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from . import __version__
 from .backcast import calculate_fixed_portfolio_backcast
 from .config import Settings, get_settings
-from .database import Base, engine, get_session
+from .database import engine, get_session, upgrade_sqlite_schema
 from .desktop_api import router as desktop_router
 from .engine import calculate_risk
 from .market_data import load_series
@@ -22,9 +22,9 @@ from .schemas import BackcastRequest, ModelKind, RiskRequest, RiskResult
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     # Alembic owns production schema changes. A fresh local SQLite database is
-    # created automatically for development convenience.
+    # created and legacy desktop databases are upgraded automatically.
     if settings.database_url.startswith("sqlite"):
-        Base.metadata.create_all(bind=engine)
+        upgrade_sqlite_schema(engine, settings.database_url)
     yield
 
 
