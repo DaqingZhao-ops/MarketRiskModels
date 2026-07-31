@@ -54,3 +54,10 @@ backend/data/
 *.db
 *.sqlite
 *.sqlite3
+
+# User portfolio data
+portfolios/user/
+
+# Local desktop build artifacts and repository-guidance backups
+/artifacts/
+/AGENTS.md_bak
